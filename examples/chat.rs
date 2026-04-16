@@ -8,14 +8,22 @@ use crossterm::execute;
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::widgets::Widget;
 use tokio::sync::mpsc;
 
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
-use promptui_core::widgets::text_field::{TextField, TextFieldAction};
+use promptui_core::widgets::text_field::{Padding, TextField, TextFieldAction};
+
+/// The 4 border colors cycled by Tab.
+const BORDER_COLORS: [Color; 4] = [
+    Color::Rgb(250, 178, 131), // primary / orange
+    Color::Rgb(92, 156, 245),  // secondary / blue
+    Color::Rgb(157, 124, 216), // accent / purple
+    Color::Rgb(127, 216, 143), // success / green
+];
 
 /// Application events.
 enum AppEvent {
@@ -68,17 +76,30 @@ struct App {
     message_list: MessageList,
     should_quit: bool,
     theme: Theme,
+    border_color_idx: usize,
 }
 
 impl App {
     fn new() -> Self {
         let theme = Theme::default();
+        let mut text_field = TextField::new(theme);
+        text_field.set_padding(Padding::uniform(1));
+        text_field.set_max_height(8);
+        text_field.set_border_color(BORDER_COLORS[0]);
+
         Self {
-            text_field: TextField::new(theme),
+            text_field,
             message_list: MessageList::new(theme),
             should_quit: false,
             theme,
+            border_color_idx: 0,
         }
+    }
+
+    fn cycle_border_color(&mut self) {
+        self.border_color_idx = (self.border_color_idx + 1) % BORDER_COLORS.len();
+        self.text_field
+            .set_border_color(BORDER_COLORS[self.border_color_idx]);
     }
 
     async fn run(&mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
@@ -128,6 +149,7 @@ impl App {
                     let input = Input::from(key);
                     match input {
                         Input::Esc => self.should_quit = true,
+                        Input::Tab => self.cycle_border_color(),
                         _ => {
                             if let TextFieldAction::Submit(content) = self.text_field.input(input) {
                                 self.message_list.push(Message {

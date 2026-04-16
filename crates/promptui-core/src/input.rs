@@ -23,6 +23,8 @@ pub enum Input {
     End,
     PageUp,
     PageDown,
+    /// Tab key.
+    Tab,
     /// Ctrl+U: clear / cut the entire buffer.
     ClearAll,
     Esc,
@@ -44,6 +46,7 @@ impl From<KeyEvent> for Input {
             // Only accept plain chars (no Ctrl/Alt modifiers) to avoid
             // interpreting escape sequences as printable text.
             KeyCode::Char(c) if !has_alt && !has_ctrl => Input::Char(c),
+            KeyCode::Tab => Input::Tab,
             KeyCode::Backspace => Input::Backspace,
             KeyCode::Delete => Input::Delete,
             KeyCode::Left => Input::Left,
