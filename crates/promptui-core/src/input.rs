@@ -3,30 +3,49 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// Abstraction over terminal key events.
 ///
 /// Converts crossterm key events into a simpler enum that widgets can
-/// pattern-match against. Shift+Enter and Alt+Enter both map to `Newline`,
-/// while bare Enter maps to `Enter`.
+/// pattern-match against. Provides emacs-style keybindings for text editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Input {
     /// A printable character.
     Char(char),
-    /// Bare Enter key (submit action).
+    /// Bare Enter key (submit action in chat context).
     Enter,
     /// Shift+Enter or Alt+Enter (insert literal newline).
     Newline,
     Backspace,
     Delete,
+    /// Tab key.
+    Tab,
+
+    // --- Cursor movement ---
     Left,
     Right,
     Up,
     Down,
     Home,
     End,
+
+    /// Alt+F / Ctrl+Right: move cursor to next word boundary.
+    WordForward,
+    /// Alt+B / Ctrl+Left: move cursor to previous word boundary.
+    WordBackward,
+
+    // --- Deletion ---
+    /// Ctrl+W / Alt+Backspace / Ctrl+Backspace: delete word backward.
+    DeleteWordBackward,
+    /// Alt+D: delete word forward.
+    DeleteWordForward,
+    /// Ctrl+K: delete from cursor to end of line.
+    KillToEnd,
+    /// Ctrl+J: delete from cursor to start of line.
+    KillToStart,
+    /// Ctrl+U: clear the entire buffer.
+    ClearAll,
+
+    // --- Scrolling ---
     PageUp,
     PageDown,
-    /// Tab key.
-    Tab,
-    /// Ctrl+U: clear / cut the entire buffer.
-    ClearAll,
+
     Esc,
     /// An unrecognized key event.
     Unknown,
@@ -34,19 +53,48 @@ pub enum Input {
 
 impl From<KeyEvent> for Input {
     fn from(key: KeyEvent) -> Self {
-        let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
-        let has_alt = key.modifiers.contains(KeyModifiers::ALT);
-        let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         match key.code {
-            KeyCode::Enter if has_shift || has_alt => Input::Newline,
+            // --- Enter ---
+            KeyCode::Enter if shift || alt => Input::Newline,
             KeyCode::Enter => Input::Enter,
-            KeyCode::Char('u') if has_ctrl => Input::ClearAll,
-            KeyCode::Char('c') if has_ctrl => Input::Esc,
-            // Only accept plain chars (no Ctrl/Alt modifiers) to avoid
-            // interpreting escape sequences as printable text.
-            KeyCode::Char(c) if !has_alt && !has_ctrl => Input::Char(c),
+
+            // --- Tab ---
             KeyCode::Tab => Input::Tab,
+
+            // --- Ctrl+key bindings ---
+            KeyCode::Char('c') if ctrl => Input::Esc,
+            KeyCode::Char('u') if ctrl => Input::ClearAll,
+            KeyCode::Char('k') if ctrl => Input::KillToEnd,
+            KeyCode::Char('j') if ctrl => Input::KillToStart,
+            KeyCode::Char('w') if ctrl => Input::DeleteWordBackward,
+            KeyCode::Char('a') if ctrl => Input::Home,
+            KeyCode::Char('e') if ctrl => Input::End,
+            KeyCode::Char('f') if ctrl => Input::Right,
+            KeyCode::Char('b') if ctrl => Input::Left,
+            KeyCode::Char('n') if ctrl => Input::Down,
+            KeyCode::Char('p') if ctrl => Input::Up,
+
+            // --- Alt+key bindings ---
+            KeyCode::Char('f') if alt => Input::WordForward,
+            KeyCode::Char('b') if alt => Input::WordBackward,
+            KeyCode::Char('d') if alt => Input::DeleteWordForward,
+            KeyCode::Backspace if alt => Input::DeleteWordBackward,
+
+            // --- Ctrl+arrow ---
+            KeyCode::Right if ctrl => Input::WordForward,
+            KeyCode::Left if ctrl => Input::WordBackward,
+
+            // --- Ctrl+Backspace (delete word) ---
+            KeyCode::Backspace if ctrl => Input::DeleteWordBackward,
+
+            // --- Plain characters (no Ctrl/Alt) ---
+            KeyCode::Char(c) if !alt && !ctrl => Input::Char(c),
+
+            // --- Navigation ---
             KeyCode::Backspace => Input::Backspace,
             KeyCode::Delete => Input::Delete,
             KeyCode::Left => Input::Left,
@@ -105,7 +153,6 @@ mod tests {
 
     #[test]
     fn ctrl_char_does_not_map_to_char() {
-        // Ctrl+x should not produce Input::Char('x')
         let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
         assert_eq!(Input::from(key), Input::Unknown);
     }
@@ -114,5 +161,59 @@ mod tests {
     fn alt_char_does_not_map_to_char() {
         let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
         assert_eq!(Input::from(key), Input::Unknown);
+    }
+
+    #[test]
+    fn ctrl_k_maps_to_kill_to_end() {
+        let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::KillToEnd);
+    }
+
+    #[test]
+    fn ctrl_w_maps_to_delete_word_backward() {
+        let key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::DeleteWordBackward);
+    }
+
+    #[test]
+    fn alt_f_maps_to_word_forward() {
+        let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT);
+        assert_eq!(Input::from(key), Input::WordForward);
+    }
+
+    #[test]
+    fn alt_b_maps_to_word_backward() {
+        let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
+        assert_eq!(Input::from(key), Input::WordBackward);
+    }
+
+    #[test]
+    fn ctrl_a_maps_to_home() {
+        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::Home);
+    }
+
+    #[test]
+    fn ctrl_e_maps_to_end() {
+        let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::End);
+    }
+
+    #[test]
+    fn ctrl_right_maps_to_word_forward() {
+        let key = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::WordForward);
+    }
+
+    #[test]
+    fn alt_backspace_maps_to_delete_word_backward() {
+        let key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT);
+        assert_eq!(Input::from(key), Input::DeleteWordBackward);
+    }
+
+    #[test]
+    fn alt_d_maps_to_delete_word_forward() {
+        let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT);
+        assert_eq!(Input::from(key), Input::DeleteWordForward);
     }
 }
