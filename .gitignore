@@ -1,0 +1,26 @@
+# Rust
+/target/
+*.snap
+
+# Nix
+/.direnv/
+/result
+/lefthook.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*~
+\#*\#
+.*.swp
+
+# Agentic
+.claude/
