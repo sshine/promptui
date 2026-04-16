@@ -14,6 +14,9 @@ const LEFT_BORDER: &str = "\u{2503}"; // ┃
 /// Left border width (1) + padding (1).
 const LEFT_INDENT: u16 = 2;
 
+/// Reserve 1 column for the cursor so wrapping treats the cursor like a character.
+const CURSOR_RESERVE: u16 = 1;
+
 /// Result of processing an input event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextFieldAction {
@@ -75,16 +78,24 @@ impl TextField {
         let content_width = width.saturating_sub(LEFT_INDENT);
         self.last_width = content_width;
 
-        if content_width == 0 {
+        // Wrap width reserves 1 column for the cursor so the cursor
+        // behaves like a character when deciding where to break lines.
+        let wrap_width = content_width.saturating_sub(CURSOR_RESERVE);
+        if wrap_width == 0 {
             return self.min_height;
         }
 
         let mut total_visual: u16 = 0;
         for line in &self.lines {
-            total_visual = total_visual.saturating_add(count_wrapped_lines(line, content_width));
+            total_visual = total_visual.saturating_add(count_wrapped_lines(line, wrap_width));
         }
 
         total_visual.clamp(self.min_height, self.max_height)
+    }
+
+    /// The effective width used for word wrapping (content width minus cursor reserve).
+    fn wrap_width(&self) -> u16 {
+        self.last_width.saturating_sub(CURSOR_RESERVE)
     }
 
     /// Returns the absolute cursor position within the given render area,
@@ -94,8 +105,8 @@ impl TextField {
             return None;
         }
 
-        let content_width = area.width.saturating_sub(LEFT_INDENT);
-        if content_width == 0 {
+        let wrap_w = self.wrap_width();
+        if wrap_w == 0 {
             return None;
         }
 
@@ -105,23 +116,20 @@ impl TextField {
             if i == self.cursor.0 {
                 break;
             }
-            visual_row =
-                visual_row.saturating_add(count_wrapped_lines(line, content_width));
+            visual_row = visual_row.saturating_add(count_wrapped_lines(line, wrap_w));
         }
 
         // Find cursor position within the current logical line's wrapped output
         let current_line = self.lines.get(self.cursor.0).map_or("", |s| s.as_str());
         let cursor_col = self.cursor.1;
-        let ranges = wrap_lines(current_line, content_width);
+        let ranges = wrap_lines(current_line, wrap_w);
 
         let mut chars_counted: usize = 0;
         for (range_idx, &(start, end)) in ranges.iter().enumerate() {
             let segment = &current_line[start..end];
             let segment_chars: usize = segment.chars().count();
 
-            if cursor_col < chars_counted + segment_chars
-                || range_idx == ranges.len() - 1
-            {
+            if cursor_col < chars_counted + segment_chars || range_idx == ranges.len() - 1 {
                 let col_in_segment = cursor_col.saturating_sub(chars_counted);
                 let display_col: u16 = segment
                     .chars()
@@ -200,6 +208,13 @@ impl TextField {
             Input::End => {
                 let len = self.current_line_char_len();
                 self.cursor.1 = len;
+                TextFieldAction::Edited
+            }
+            Input::ClearAll => {
+                if self.lines.len() == 1 && self.lines[0].is_empty() {
+                    return TextFieldAction::Ignored;
+                }
+                self.clear();
                 TextFieldAction::Edited
             }
             _ => TextFieldAction::Ignored,
@@ -299,7 +314,10 @@ impl TextField {
         let (row, _col) = self.cursor;
         if row > 0 {
             self.cursor.0 -= 1;
-            let max_col = self.lines.get(self.cursor.0).map_or(0, |l| l.chars().count());
+            let max_col = self
+                .lines
+                .get(self.cursor.0)
+                .map_or(0, |l| l.chars().count());
             self.cursor.1 = self.cursor.1.min(max_col);
         }
     }
@@ -308,13 +326,18 @@ impl TextField {
         let (row, _col) = self.cursor;
         if row + 1 < self.lines.len() {
             self.cursor.0 += 1;
-            let max_col = self.lines.get(self.cursor.0).map_or(0, |l| l.chars().count());
+            let max_col = self
+                .lines
+                .get(self.cursor.0)
+                .map_or(0, |l| l.chars().count());
             self.cursor.1 = self.cursor.1.min(max_col);
         }
     }
 
     fn current_line_char_len(&self) -> usize {
-        self.lines.get(self.cursor.0).map_or(0, |l| l.chars().count())
+        self.lines
+            .get(self.cursor.0)
+            .map_or(0, |l| l.chars().count())
     }
 }
 
@@ -324,7 +347,7 @@ impl Widget for &TextField {
             return;
         }
 
-        let content_width = area.width.saturating_sub(LEFT_INDENT);
+        let wrap_w = self.wrap_width();
 
         // Fill background
         for y in area.y..area.y + area.height {
@@ -357,7 +380,7 @@ impl Widget for &TextField {
         let mut visual_y: u16 = 0;
 
         for (line_idx, line) in self.lines.iter().enumerate() {
-            let ranges = wrap_lines(line, content_width);
+            let ranges = wrap_lines(line, wrap_w);
 
             let mut chars_counted: usize = 0;
             for &(start, end) in &ranges {
@@ -397,9 +420,7 @@ impl Widget for &TextField {
                     && self.cursor.1 == chars_counted + segment_char_count
                     && x < area.x + area.width;
 
-                if is_cursor_at_end
-                    && let Some(cell) = buf.cell_mut((x, y))
-                {
+                if is_cursor_at_end && let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(' ');
                     cell.set_style(cursor_style);
                 }
@@ -490,5 +511,90 @@ mod tests {
     fn empty_enter_is_ignored() {
         let mut tf = TextField::new(Theme::default());
         assert_eq!(tf.input(Input::Enter), TextFieldAction::Ignored);
+    }
+
+    #[test]
+    fn clear_all_empties_buffer() {
+        let mut tf = TextField::new(Theme::default());
+        tf.input(Input::Char('h'));
+        tf.input(Input::Char('e'));
+        tf.input(Input::Char('l'));
+        tf.input(Input::Char('l'));
+        tf.input(Input::Char('o'));
+        assert_eq!(tf.input(Input::ClearAll), TextFieldAction::Edited);
+        assert_eq!(tf.content(), "");
+        assert_eq!(tf.cursor, (0, 0));
+    }
+
+    #[test]
+    fn clear_all_on_empty_is_ignored() {
+        let mut tf = TextField::new(Theme::default());
+        assert_eq!(tf.input(Input::ClearAll), TextFieldAction::Ignored);
+    }
+
+    #[test]
+    fn clear_all_with_multiline() {
+        let mut tf = TextField::new(Theme::default());
+        tf.input(Input::Char('a'));
+        tf.input(Input::Newline);
+        tf.input(Input::Char('b'));
+        assert_eq!(tf.content(), "a\nb");
+        tf.input(Input::ClearAll);
+        assert_eq!(tf.content(), "");
+    }
+
+    // --- Cursor-aware wrapping regression tests ---
+
+    #[test]
+    fn height_grows_before_cursor_hits_edge() {
+        // With total widget width 12, LEFT_INDENT=2, CURSOR_RESERVE=1,
+        // the effective wrap width is 12-2-1=9.
+        // Typing 9 characters should cause wrapping to a second line,
+        // so required_height should grow beyond min_height=3 when we have
+        // enough lines. But more importantly, 9 chars should wrap to 2 visual lines.
+        let mut tf = TextField::new(Theme::default());
+        // Type exactly 9 chars (fills wrap_width=9 exactly)
+        for c in "abcdefghi".chars() {
+            tf.input(Input::Char(c));
+        }
+        // At width 12: content_width=10, wrap_width=9
+        // "abcdefghi" is 9 chars in 9 cols → fits in 1 line
+        assert_eq!(tf.required_height(12), 3); // still min_height
+
+        // One more char → 10 chars in 9 cols → wraps to 2 lines
+        tf.input(Input::Char('j'));
+        assert_eq!(tf.required_height(12), 3); // 2 visual lines, but min is 3
+
+        // Now make it actually exceed min_height
+        // With wrap_width=9, we need >3 visual lines → >27 chars
+        let mut tf2 = TextField::new(Theme::default());
+        for c in "aaa bbb ccc ddd eee fff ggg".chars() {
+            tf2.input(Input::Char(c));
+        }
+        // 27 chars. At wrap_width=9: "aaa bbb " (8) | "ccc ddd " (8) | "eee fff " (8) | "ggg" (3) → 4 lines
+        let h = tf2.required_height(12);
+        assert!(h >= 4, "expected height >= 4, got {h}");
+    }
+
+    #[test]
+    fn wrapping_with_cursor_reserve_at_exact_boundary() {
+        // Widget width 7, LEFT_INDENT=2, CURSOR_RESERVE=1 → wrap_width=4
+        let mut tf = TextField::new(Theme::default());
+        // Type "abcd" (exactly 4 chars = wrap_width)
+        for c in "abcd".chars() {
+            tf.input(Input::Char(c));
+        }
+        // Should be 1 visual line: "abcd" fits in 4 cols
+        // Adding one more char should wrap
+        tf.input(Input::Char('e'));
+        // "abcde" in width 4 → 2 visual lines
+        // required_height returns max(2, min_height=3) = 3
+        assert_eq!(tf.required_height(7), 3);
+
+        // Verify the wrapping actually happened by checking content renders on 2 visual lines
+        let wrap_w = tf.wrap_width();
+        assert_eq!(wrap_w, 4);
+        let lines = crate::widgets::word_wrap::count_wrapped_lines("abcde", wrap_w);
+        assert_eq!(lines, 2);
     }
 }

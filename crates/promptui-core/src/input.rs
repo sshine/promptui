@@ -23,6 +23,8 @@ pub enum Input {
     End,
     PageUp,
     PageDown,
+    /// Ctrl+U: clear / cut the entire buffer.
+    ClearAll,
     Esc,
     /// An unrecognized key event.
     Unknown,
@@ -32,11 +34,16 @@ impl From<KeyEvent> for Input {
     fn from(key: KeyEvent) -> Self {
         let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let has_alt = key.modifiers.contains(KeyModifiers::ALT);
+        let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         match key.code {
             KeyCode::Enter if has_shift || has_alt => Input::Newline,
             KeyCode::Enter => Input::Enter,
-            KeyCode::Char(c) if !has_alt => Input::Char(c),
+            KeyCode::Char('u') if has_ctrl => Input::ClearAll,
+            KeyCode::Char('c') if has_ctrl => Input::Esc,
+            // Only accept plain chars (no Ctrl/Alt modifiers) to avoid
+            // interpreting escape sequences as printable text.
+            KeyCode::Char(c) if !has_alt && !has_ctrl => Input::Char(c),
             KeyCode::Backspace => Input::Backspace,
             KeyCode::Delete => Input::Delete,
             KeyCode::Left => Input::Left,
@@ -79,5 +86,30 @@ mod tests {
     fn char_maps_to_char() {
         let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         assert_eq!(Input::from(key), Input::Char('a'));
+    }
+
+    #[test]
+    fn ctrl_u_maps_to_clear_all() {
+        let key = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::ClearAll);
+    }
+
+    #[test]
+    fn ctrl_c_maps_to_esc() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::Esc);
+    }
+
+    #[test]
+    fn ctrl_char_does_not_map_to_char() {
+        // Ctrl+x should not produce Input::Char('x')
+        let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        assert_eq!(Input::from(key), Input::Unknown);
+    }
+
+    #[test]
+    fn alt_char_does_not_map_to_char() {
+        let key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
+        assert_eq!(Input::from(key), Input::Unknown);
     }
 }

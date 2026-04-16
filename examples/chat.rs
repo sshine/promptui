@@ -1,15 +1,15 @@
 use std::io;
 
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseEventKind,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, KeyboardEnhancementFlags,
+    MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use futures::StreamExt;
+use ratatui::DefaultTerminal;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::widgets::Widget;
-use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use promptui_core::input::Input;
@@ -97,19 +97,17 @@ impl App {
                 let area = frame.area();
 
                 // Fill entire background
-                let bg = ratatui::widgets::Block::default()
-                    .style(Style::default().bg(self.theme.bg));
+                let bg =
+                    ratatui::widgets::Block::default().style(Style::default().bg(self.theme.bg));
                 bg.render(area, frame.buffer_mut());
 
                 // Compute dynamic text field height
                 let input_height = self.text_field.required_height(area.width);
 
                 // Split: messages on top, input at bottom
-                let chunks = Layout::vertical([
-                    Constraint::Min(3),
-                    Constraint::Length(input_height),
-                ])
-                .split(area);
+                let chunks =
+                    Layout::vertical([Constraint::Min(3), Constraint::Length(input_height)])
+                        .split(area);
 
                 // Render widgets
                 (&self.message_list).render(chunks[0], frame.buffer_mut());
@@ -140,13 +138,11 @@ impl App {
                         }
                     }
                 }
-                Some(AppEvent::Terminal(Event::Mouse(mouse))) => {
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => self.message_list.scroll_up(3),
-                        MouseEventKind::ScrollDown => self.message_list.scroll_down(3),
-                        _ => {}
-                    }
-                }
+                Some(AppEvent::Terminal(Event::Mouse(mouse))) => match mouse.kind {
+                    MouseEventKind::ScrollUp => self.message_list.scroll_up(3),
+                    MouseEventKind::ScrollDown => self.message_list.scroll_down(3),
+                    _ => {}
+                },
                 Some(AppEvent::Terminal(Event::Resize(_, _))) => {
                     // Layout recomputes automatically on next draw
                 }

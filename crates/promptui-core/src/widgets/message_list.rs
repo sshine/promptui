@@ -142,7 +142,9 @@ impl Widget for &MessageList {
         // Determine the starting visual row (bottom-aligned with scroll)
         // bottom_y is the row just past the last visible row
         let visible_height = area.height;
-        let scroll = self.scroll_offset.min(total_height.saturating_sub(visible_height));
+        let scroll = self
+            .scroll_offset
+            .min(total_height.saturating_sub(visible_height));
 
         // We render by walking messages and placing them from the bottom up.
         // First, find where the bottom of all content sits:
