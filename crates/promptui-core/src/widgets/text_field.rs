@@ -35,6 +35,15 @@ pub enum TextFieldAction {
     Ignored,
 }
 
+/// Callback for per-character style overrides during rendering.
+///
+/// Called with `(logical_line, char_offset, char)` for each character.
+/// Return `Some(style)` to override the default text style for that character,
+/// or `None` to use the default. The returned style is patched onto the base
+/// text style, so you only need to set the attributes you want to change
+/// (e.g. just foreground color).
+pub type StyleFn = Box<dyn Fn(usize, usize, char) -> Option<Style>>;
+
 /// A word-wrapping text input widget with dynamic height.
 ///
 /// Owns its state (text content, cursor position) and renders by reference.
@@ -51,6 +60,7 @@ pub struct TextField {
     focused: bool,
     scroll_offset: u16, // visual lines scrolled from top
     last_content_width: u16,
+    style_fn: Option<StyleFn>,
 }
 
 impl TextField {
@@ -66,6 +76,7 @@ impl TextField {
             focused: true,
             scroll_offset: 0,
             last_content_width: 0,
+            style_fn: None,
         }
     }
 
@@ -87,6 +98,13 @@ impl TextField {
 
     pub fn set_max_height(&mut self, max: u16) {
         self.max_height = max;
+    }
+
+    /// Set a callback for per-character style overrides.
+    ///
+    /// See [`StyleFn`] for details.
+    pub fn set_style_fn(&mut self, f: impl Fn(usize, usize, char) -> Option<Style> + 'static) {
+        self.style_fn = Some(Box::new(f));
     }
 
     /// Returns the text content, joining logical lines with newlines.
@@ -612,7 +630,18 @@ impl Widget for &TextField {
                             && line_idx == self.cursor.0
                             && absolute_char_idx == self.cursor.1;
 
-                        let style = if is_cursor { cursor_style } else { text_style };
+                        let base = match &self.style_fn {
+                            Some(f) => match f(line_idx, absolute_char_idx, ch) {
+                                Some(s) => text_style.patch(s),
+                                None => text_style,
+                            },
+                            None => text_style,
+                        };
+                        let style = if is_cursor {
+                            base.add_modifier(Modifier::REVERSED)
+                        } else {
+                            base
+                        };
 
                         if let Some(cell) = buf.cell_mut((x, y)) {
                             cell.set_char(ch);

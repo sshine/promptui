@@ -10,6 +10,7 @@ use rand::Rng;
 use ratatui::DefaultTerminal;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 use tokio::sync::mpsc;
 
@@ -30,6 +31,10 @@ enum AppEvent {
     Tick,
     /// Start streaming a reply after the thinking delay.
     StreamStart(String),
+    /// Shell command finished; carries the command string and its output.
+    ShellOutput {
+        output: String,
+    },
 }
 
 /// Reads crossterm events and ticks, sending them to the app.
@@ -97,6 +102,14 @@ impl App {
         let mut text_field = TextField::new(theme);
         text_field.set_padding(Padding::uniform(1));
         text_field.set_max_height(8);
+        let golden = theme.warning;
+        text_field.set_style_fn(move |line, col, ch| {
+            if line == 0 && col == 0 && ch == '$' {
+                Some(Style::default().fg(golden))
+            } else {
+                None
+            }
+        });
 
         let mut message_list = MessageList::new(theme);
         message_list.set_padding(Padding::uniform(1));
@@ -214,32 +227,74 @@ impl App {
                         Input::PageDown => self.scroll_box.page_down(),
                         _ => {
                             if let TextFieldAction::Submit(content) = self.text_field.input(input) {
-                                self.message_list.push(Message {
-                                    role: Role::User,
-                                    content,
-                                });
-                                self.scroll_box.scroll_to_bottom();
-                                self.notice
-                                    .show(NoticeLevel::Error, "Could not connect. Are you online?");
+                                if let Some(cmd) = content.strip_prefix('$') {
+                                    let cmd = cmd.trim().to_string();
+                                    let styled_line = Line::from(vec![
+                                        Span::styled("$ ", Style::default().fg(self.theme.warning)),
+                                        Span::raw(cmd.clone()),
+                                    ]);
+                                    self.message_list
+                                        .push(Message::styled(Role::User, styled_line.into()));
+                                    self.scroll_box.scroll_to_bottom();
 
-                                self.status_bar
-                                    .set_latency_ms(rand::rng().random_range(10..=150));
+                                    self.thinking_verb = "Running...".to_string();
+                                    self.spinner.start();
 
-                                // Start thinking
-                                self.thinking_verb = thinking_verb();
-                                self.spinner.start();
+                                    let tx = events.sender();
+                                    tokio::spawn(async move {
+                                        let result = tokio::process::Command::new("sh")
+                                            .arg("-c")
+                                            .arg(&cmd)
+                                            .output()
+                                            .await;
+                                        let output = match result {
+                                            Ok(out) => {
+                                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                                let mut s = stdout.into_owned();
+                                                if !stderr.is_empty() {
+                                                    if !s.is_empty() {
+                                                        s.push('\n');
+                                                    }
+                                                    s.push_str(&stderr);
+                                                }
+                                                if s.is_empty() {
+                                                    "(no output)".to_string()
+                                                } else {
+                                                    s
+                                                }
+                                            }
+                                            Err(e) => format!("error: {e}"),
+                                        };
+                                        let _ = tx.send(AppEvent::ShellOutput { output });
+                                    });
+                                } else {
+                                    self.message_list.push(Message::plain(Role::User, content));
+                                    self.scroll_box.scroll_to_bottom();
+                                    self.notice.show(
+                                        NoticeLevel::Error,
+                                        "Could not connect. Are you online?",
+                                    );
 
-                                // Schedule the reply after 1-3 seconds
-                                let tx = events.sender();
-                                let reply = mock_reply();
-                                let delay_ms = rand::rng().random_range(1000..=3000);
-                                tokio::spawn(async move {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                                        delay_ms,
-                                    ))
-                                    .await;
-                                    let _ = tx.send(AppEvent::StreamStart(reply));
-                                });
+                                    self.status_bar
+                                        .set_latency_ms(rand::rng().random_range(10..=150));
+
+                                    // Start thinking
+                                    self.thinking_verb = thinking_verb();
+                                    self.spinner.start();
+
+                                    // Schedule the reply after 1-3 seconds
+                                    let tx = events.sender();
+                                    let reply = mock_reply();
+                                    let delay_ms = rand::rng().random_range(1000..=3000);
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                                            delay_ms,
+                                        ))
+                                        .await;
+                                        let _ = tx.send(AppEvent::StreamStart(reply));
+                                    });
+                                }
                             }
                         }
                     }
@@ -248,14 +303,18 @@ impl App {
                     self.spinner.stop();
                     self.status_bar.set_activity(String::new());
                     // Push an empty assistant message; streaming will fill it
-                    self.message_list.push(Message {
-                        role: Role::Assistant,
-                        content: String::new(),
-                    });
+                    self.message_list.push(Message::plain(Role::Assistant, ""));
                     let mut streaming = StreamingText::new(self.theme);
                     streaming.push_str(&reply);
                     streaming.finish();
                     self.streaming = Some(streaming);
+                    self.scroll_box.scroll_to_bottom();
+                }
+                Some(AppEvent::ShellOutput { output }) => {
+                    self.spinner.stop();
+                    self.status_bar.set_activity(String::new());
+                    let output = output.trim_end().to_string();
+                    self.message_list.push(Message::plain(Role::System, output));
                     self.scroll_box.scroll_to_bottom();
                 }
                 Some(AppEvent::Terminal(Event::Mouse(mouse))) => match mouse.kind {

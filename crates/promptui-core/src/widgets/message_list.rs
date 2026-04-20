@@ -15,11 +15,30 @@ const LEFT_BORDER: &str = "\u{2503}"; // ┃
 /// Border occupies 1 column.
 const BORDER_WIDTH: u16 = 1;
 
-/// A chat message with a role and text content.
+/// A chat message with a role and styled text content.
+///
+/// Content is stored as [`Text`], supporting arbitrary inline styling
+/// (colored spans, bold, etc.). Use [`Message::plain`] for unstyled text
+/// or construct `Text` directly for rich content.
 #[derive(Debug, Clone)]
 pub struct Message {
     pub role: Role,
-    pub content: String,
+    pub content: Text<'static>,
+}
+
+impl Message {
+    /// Create a message with plain, unstyled text.
+    pub fn plain(role: Role, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: Text::from(content.into()),
+        }
+    }
+
+    /// Create a message with pre-styled rich text.
+    pub fn styled(role: Role, content: Text<'static>) -> Self {
+        Self { role, content }
+    }
 }
 
 /// Who authored a message.
@@ -27,6 +46,21 @@ pub struct Message {
 pub enum Role {
     User,
     Assistant,
+    System,
+}
+
+/// Extract the plain text from a [`Text`], joining lines with newlines.
+fn plain_text(text: &Text) -> String {
+    let mut s = String::new();
+    for (i, line) in text.lines.iter().enumerate() {
+        if i > 0 {
+            s.push('\n');
+        }
+        for span in &line.spans {
+            s.push_str(&span.content);
+        }
+    }
+    s
 }
 
 /// A list of chat messages rendered with left-border indicators.
@@ -61,10 +95,11 @@ impl MessageList {
         self.messages.is_empty()
     }
 
-    /// Replace the content of the last message (e.g. for spinner → real reply).
+    /// Replace the content of the last message with plain text
+    /// (e.g. for streaming updates).
     pub fn set_last_content(&mut self, content: String) {
         if let Some(msg) = self.messages.last_mut() {
-            msg.content = content;
+            msg.content = Text::from(content);
         }
     }
 
@@ -72,7 +107,7 @@ impl MessageList {
     pub fn total_word_count(&self) -> usize {
         self.messages
             .iter()
-            .map(|m| m.content.split_whitespace().count())
+            .map(|m| plain_text(&m.content).split_whitespace().count())
             .sum()
     }
 
@@ -86,17 +121,19 @@ impl MessageList {
         let fg = match role {
             Role::User => self.theme.primary,
             Role::Assistant => self.theme.secondary,
+            Role::System => self.theme.info,
         };
         Style::default().fg(fg).bg(self.theme.panel_bg)
     }
 
     /// Compute the visual height of a single message (wrapped text + vertical padding).
-    fn message_height(&self, content: &str, text_width: u16) -> u16 {
-        let text_lines = if content.is_empty() {
+    fn message_height(&self, content: &Text, text_width: u16) -> u16 {
+        let plain = plain_text(content);
+        let text_lines = if plain.is_empty() {
             1
         } else {
             let mut total: u16 = 0;
-            for line in content.split('\n') {
+            for line in plain.split('\n') {
                 total = total.saturating_add(count_wrapped_lines(line, text_width));
             }
             total
@@ -221,7 +258,8 @@ impl MessageList {
                     let skip_lines = content_top.saturating_sub(msg_top + self.padding.top);
 
                     if text_area.height > 0 {
-                        let paragraph = Paragraph::new(Text::styled(&msg.content, text_style))
+                        let paragraph = Paragraph::new(msg.content.clone())
+                            .style(text_style)
                             .wrap(Wrap { trim: false })
                             .scroll((skip_lines, 0));
                         paragraph.render(text_area, buf);
@@ -260,20 +298,14 @@ mod tests {
     #[test]
     fn push_adds_message() {
         let mut ml = MessageList::new(Theme::default());
-        ml.push(Message {
-            role: Role::User,
-            content: "hello".to_string(),
-        });
+        ml.push(Message::plain(Role::User, "hello"));
         assert!(!ml.is_empty());
     }
 
     #[test]
     fn content_height_single_message() {
         let mut ml = MessageList::new(Theme::default());
-        ml.push(Message {
-            role: Role::User,
-            content: "hello".to_string(),
-        });
+        ml.push(Message::plain(Role::User, "hello"));
         // At width 40: LEFT_INDENT=2, content_width=38, "hello" = 1 line
         assert_eq!(ml.content_height(40), 1);
     }
@@ -281,14 +313,8 @@ mod tests {
     #[test]
     fn content_height_with_separator() {
         let mut ml = MessageList::new(Theme::default());
-        ml.push(Message {
-            role: Role::User,
-            content: "hello".to_string(),
-        });
-        ml.push(Message {
-            role: Role::Assistant,
-            content: "world".to_string(),
-        });
+        ml.push(Message::plain(Role::User, "hello"));
+        ml.push(Message::plain(Role::Assistant, "world"));
         // 1 + 1 separator + 1 = 3
         assert_eq!(ml.content_height(40), 3);
     }
