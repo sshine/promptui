@@ -12,6 +12,8 @@ use ratatui::style::Style;
 use ratatui::widgets::Widget;
 use tokio::sync::mpsc;
 
+use rand::Rng;
+
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
@@ -87,7 +89,7 @@ impl App {
         message_list.set_padding(Padding::uniform(1));
 
         let mut status_bar = StatusBar::new(theme, 200_000);
-        // Set initial border color from mode
+        status_bar.set_padding(Padding::uniform(1));
         text_field.set_border_color(status_bar.mode().color(&theme));
         // Set cwd, replacing home dir with ~
         if let Ok(cwd) = std::env::current_dir() {
@@ -135,10 +137,10 @@ impl App {
 
                 let input_height = self.text_field.required_height(area.width);
 
-                // Split: scroll box on top, status bar (1 row), input at bottom
+                let status_height = self.status_bar.height();
                 let chunks = Layout::vertical([
                     Constraint::Min(3),
-                    Constraint::Length(1),
+                    Constraint::Length(status_height),
                     Constraint::Length(input_height),
                 ])
                 .split(area);
@@ -173,6 +175,10 @@ impl App {
                                     role: Role::User,
                                     content,
                                 });
+                                self.message_list.push(Message {
+                                    role: Role::Assistant,
+                                    content: mock_reply(),
+                                });
                                 self.scroll_box.scroll_to_bottom();
                             }
                         }
@@ -198,6 +204,24 @@ impl App {
 
         Ok(())
     }
+}
+
+const MOCK_REPLIES: [&str; 10] = [
+    "That's a great idea! Let me think about how to approach this.",
+    "Interesting thought. I'll need a moment to consider the best way forward.",
+    "Love it. Give me a second to work through the details.",
+    "Great suggestion! Let me mull that over.",
+    "Ooh, that's a fun one. Let me think on it.",
+    "Solid plan. I'll chew on that for a bit.",
+    "Nice, I like where this is heading. Let me reflect on it.",
+    "That's worth exploring. Give me a moment to think it through.",
+    "Brilliant. Let me sit with that idea for a moment.",
+    "Fascinating. I'll ponder that and get back to you.",
+];
+
+fn mock_reply() -> String {
+    let idx = rand::rng().random_range(0..MOCK_REPLIES.len());
+    MOCK_REPLIES[idx].to_string()
 }
 
 #[tokio::main]

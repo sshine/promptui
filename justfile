@@ -26,6 +26,9 @@ test-verbose:
 build:
     cargo build --release --all-features
 
+demo:
+    cargo run -p promptui-examples --bin chat
+
 # Generate documentation
 doc *args='':
     cargo doc --no-deps --all-features {{args}}
@@ -41,7 +44,3 @@ watch:
 # Clean build artifacts
 clean:
     cargo clean
-
-# Review snapshot test changes
-snap:
-    cargo insta test --review

@@ -76,12 +76,24 @@ impl ScrollBox {
             return;
         }
 
-        // Always reserve scrollbar column so content width stays stable
-        let content_width = area.width.saturating_sub(SCROLLBAR_WIDTH);
+        // Check if scrollbar is needed at full width first
+        let full_height = content.content_height(area.width);
+        let needs_scrollbar = full_height > area.height;
+
+        // Only reserve the scrollbar column when content actually overflows
+        let content_width = if needs_scrollbar {
+            area.width.saturating_sub(SCROLLBAR_WIDTH)
+        } else {
+            area.width
+        };
         let content_area = Rect::new(area.x, area.y, content_width, area.height);
 
-        // Compute content height and clamp scroll
-        let content_height = content.content_height(content_width);
+        // Recompute height at actual content width (may differ when scrollbar steals a column)
+        let content_height = if needs_scrollbar {
+            content.content_height(content_width)
+        } else {
+            full_height
+        };
         self.last_content_height = content_height;
         self.last_viewport_height = area.height;
         self.clamp_scroll();
@@ -89,11 +101,11 @@ impl ScrollBox {
         // Render content
         content.render_scrolled(content_area, buf, self.scroll_offset);
 
-        // Render scrollbar (position is top-aligned for Scrollbar widget)
-        let max_scroll = content_height.saturating_sub(area.height);
-        let position = max_scroll.saturating_sub(self.scroll_offset);
-        let scrollbar = Scrollbar::new(content_height, area.height, position);
-        if scrollbar.is_visible() {
+        // Render scrollbar
+        if needs_scrollbar {
+            let max_scroll = content_height.saturating_sub(area.height);
+            let position = max_scroll.saturating_sub(self.scroll_offset);
+            let scrollbar = Scrollbar::new(content_height, area.height, position);
             let sb_area = Rect::new(area.x + content_width, area.y, SCROLLBAR_WIDTH, area.height);
             scrollbar.render(sb_area, buf);
         }

@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Widget;
 
 use crate::theme::Theme;
+use crate::widgets::padding::Padding;
 
 /// Agent operating mode, cycled by Tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +81,7 @@ pub struct StatusBar {
     mode: Mode,
     context: ContextState,
     cwd: String,
+    padding: Padding,
     theme: Theme,
 }
 
@@ -89,8 +91,18 @@ impl StatusBar {
             mode: Mode::Plan,
             context: ContextState::new(context_window),
             cwd: String::new(),
+            padding: Padding::uniform(0),
             theme,
         }
+    }
+
+    pub fn set_padding(&mut self, padding: Padding) {
+        self.padding = padding;
+    }
+
+    /// Total height including padding.
+    pub fn height(&self) -> u16 {
+        1 + self.padding.vertical()
     }
 
     pub fn mode(&self) -> Mode {
@@ -132,12 +144,20 @@ impl Widget for &StatusBar {
         let sep_style = Style::default().fg(self.theme.text_muted).bg(self.theme.bg);
         let muted_style = Style::default().fg(self.theme.text_muted).bg(self.theme.bg);
 
-        // Fill background
-        for x in area.x..area.x + area.width {
-            if let Some(cell) = buf.cell_mut((x, area.y)) {
-                cell.set_char(' ');
-                cell.set_style(bg_style);
+        // Fill entire background
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_char(' ');
+                    cell.set_style(bg_style);
+                }
             }
+        }
+
+        // The text row sits inside the padding
+        let text_y = area.y + self.padding.top;
+        if text_y >= area.y + area.height {
+            return;
         }
 
         // --- Left segments ---
@@ -156,7 +176,6 @@ impl Widget for &StatusBar {
         let plan = "Z.ai Coding Plan";
 
         let left_parts: Vec<(&str, Style)> = vec![
-            (" ", bg_style),
             (mode_label, mode_style),
             (sep, sep_style),
             (model, model_style),
@@ -164,15 +183,15 @@ impl Widget for &StatusBar {
             (plan, muted_style),
         ];
 
-        let mut x = area.x;
-        let x_max = area.x + area.width;
+        let mut x = area.x + self.padding.left;
+        let x_max = area.x + area.width.saturating_sub(self.padding.right);
 
         for (text, style) in &left_parts {
             for ch in text.chars() {
                 if x >= x_max {
                     return;
                 }
-                if let Some(cell) = buf.cell_mut((x, area.y)) {
+                if let Some(cell) = buf.cell_mut((x, text_y)) {
                     cell.set_char(ch);
                     cell.set_style(*style);
                 }
@@ -187,9 +206,9 @@ impl Widget for &StatusBar {
         let display_cwd = self.display_cwd();
 
         let right_text = if display_cwd.is_empty() {
-            format!("{context_text} ")
+            context_text
         } else {
-            format!("{display_cwd}{sep}{context_text} ")
+            format!("{display_cwd}{sep}{context_text}")
         };
 
         let right_len = right_text.len() as u16;
@@ -213,7 +232,7 @@ impl Widget for &StatusBar {
             } else {
                 muted_style
             };
-            if let Some(cell) = buf.cell_mut((rx, area.y)) {
+            if let Some(cell) = buf.cell_mut((rx, text_y)) {
                 cell.set_char(ch);
                 cell.set_style(style);
             }

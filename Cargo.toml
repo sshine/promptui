@@ -35,5 +35,8 @@ futures = "0.3"
 # Unicode
 unicode-width = "0.2"
 
+# Misc
+rand = "0.9"
+
 # Dev dependencies
 insta = { version = "1", features = ["yaml"] }
