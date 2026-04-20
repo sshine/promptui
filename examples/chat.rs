@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
+use promptui_core::widgets::notice::{Notice, NoticeLevel};
 use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
 use promptui_core::widgets::spinner::{Spinner, SpinnerStyle};
@@ -80,6 +81,7 @@ struct App {
     scroll_box: ScrollBox,
     status_bar: StatusBar,
     spinner: Spinner,
+    notice: Notice,
     /// The verb shown while thinking (e.g. "Pondering...").
     thinking_verb: String,
     should_quit: bool,
@@ -115,7 +117,12 @@ impl App {
             message_list,
             scroll_box: ScrollBox::new(),
             status_bar,
-            spinner: Spinner::new(SpinnerStyle::MOON_PHASES),
+            spinner: Spinner::new(SpinnerStyle::WAVE_RIPPLE),
+            notice: {
+                let mut n = Notice::new(theme);
+                n.set_padding(Padding::uniform(1));
+                n
+            },
             thinking_verb: String::new(),
             should_quit: false,
             theme,
@@ -132,11 +139,12 @@ impl App {
         let mut events = EventHandler::new();
 
         loop {
-            // Advance spinner and update status bar activity
+            // Advance spinner, toast timer, and update status bar activity
             self.spinner.tick();
+            self.notice.tick();
             if self.spinner.is_active() {
                 self.status_bar.set_activity(format!(
-                    "{}  {}",
+                    "{} {}",
                     self.spinner.frame(),
                     self.thinking_verb
                 ));
@@ -164,6 +172,7 @@ impl App {
 
                 self.scroll_box
                     .render(chunks[0], frame.buffer_mut(), &self.message_list);
+                (&self.notice).render(chunks[0], frame.buffer_mut());
                 (&self.status_bar).render(chunks[1], frame.buffer_mut());
                 (&self.text_field).render(chunks[2], frame.buffer_mut());
 
@@ -193,6 +202,8 @@ impl App {
                                     content,
                                 });
                                 self.scroll_box.scroll_to_bottom();
+                                self.notice
+                                    .show(NoticeLevel::Error, "Could not connect. Are you online?");
 
                                 // Start thinking
                                 self.thinking_verb = thinking_verb();
@@ -257,7 +268,7 @@ const MOCK_REPLIES: [&str; 10] = [
     "Fascinating. I'll ponder that and get back to you.",
 ];
 
-const THINKING_VERBS: [&str; 10] = [
+const THINKING_VERBS: [&str; 9] = [
     "Thinking...",
     "Pondering...",
     "Mulling...",
@@ -267,7 +278,6 @@ const THINKING_VERBS: [&str; 10] = [
     "Plotting...",
     "Scheming...",
     "Conjuring...",
-    "Awaiting...",
 ];
 
 fn mock_reply() -> String {

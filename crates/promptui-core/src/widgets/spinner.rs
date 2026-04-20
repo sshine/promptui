@@ -10,9 +10,9 @@ pub struct SpinnerStyle {
 }
 
 impl SpinnerStyle {
-    /// Moon waxing and waning. Each frame is 2 cells wide (emoji).
+    /// Moon waxing and waning. Each frame is emoji + trailing space for alignment.
     pub const MOON_PHASES: Self = Self {
-        frames: &["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"],
+        frames: &["🌑 ", "🌒 ", "🌓 ", "🌔 ", "🌕 ", "🌖 ", "🌗 ", "🌘 "],
         interval: Duration::from_millis(150),
     };
 
@@ -164,6 +164,6 @@ mod tests {
         s.last_tick = Instant::now() - Duration::from_millis(200);
         s.tick();
         s.set_style(SpinnerStyle::MOON_PHASES);
-        assert_eq!(s.frame(), "🌑");
+        assert_eq!(s.frame(), "🌑 ");
     }
 }

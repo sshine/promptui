@@ -1,4 +1,5 @@
 pub mod message_list;
+pub mod notice;
 pub mod padding;
 pub mod scroll_box;
 pub mod scrollbar;
