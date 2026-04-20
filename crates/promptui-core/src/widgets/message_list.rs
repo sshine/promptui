@@ -5,14 +5,15 @@ use ratatui::text::Text;
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use crate::theme::Theme;
+use crate::widgets::padding::Padding;
 use crate::widgets::scroll_box::Scrollable;
 use crate::widgets::word_wrap::count_wrapped_lines;
 
 /// Left border character matching OpenCode's style.
 const LEFT_BORDER: &str = "\u{2503}"; // ┃
 
-/// Left border width (1) + padding (1).
-const LEFT_INDENT: u16 = 2;
+/// Border occupies 1 column.
+const BORDER_WIDTH: u16 = 1;
 
 /// A chat message with a role and text content.
 #[derive(Debug, Clone)]
@@ -34,6 +35,7 @@ pub enum Role {
 /// Scrolling is managed externally by a [`ScrollBox`](crate::widgets::scroll_box::ScrollBox).
 pub struct MessageList {
     messages: Vec<Message>,
+    padding: Padding,
     theme: Theme,
 }
 
@@ -41,8 +43,13 @@ impl MessageList {
     pub fn new(theme: Theme) -> Self {
         Self {
             messages: Vec::new(),
+            padding: Padding::uniform(0),
             theme,
         }
+    }
+
+    pub fn set_padding(&mut self, padding: Padding) {
+        self.padding = padding;
     }
 
     /// Append a message.
@@ -54,6 +61,11 @@ impl MessageList {
         self.messages.is_empty()
     }
 
+    /// Horizontal overhead per message: border + left padding + right padding.
+    fn h_overhead(&self) -> u16 {
+        BORDER_WIDTH + self.padding.horizontal()
+    }
+
     /// Border color for a given role.
     fn border_color(&self, role: Role) -> Style {
         let fg = match role {
@@ -63,27 +75,29 @@ impl MessageList {
         Style::default().fg(fg).bg(self.theme.panel_bg)
     }
 
-    /// Compute the visual height of a single message (wrapped lines).
-    fn message_height(&self, content: &str, content_width: u16) -> u16 {
-        if content.is_empty() {
-            return 1;
-        }
-        let mut total: u16 = 0;
-        for line in content.split('\n') {
-            total = total.saturating_add(count_wrapped_lines(line, content_width));
-        }
-        total
+    /// Compute the visual height of a single message (wrapped text + vertical padding).
+    fn message_height(&self, content: &str, text_width: u16) -> u16 {
+        let text_lines = if content.is_empty() {
+            1
+        } else {
+            let mut total: u16 = 0;
+            for line in content.split('\n') {
+                total = total.saturating_add(count_wrapped_lines(line, text_width));
+            }
+            total
+        };
+        text_lines + self.padding.vertical()
     }
 
     /// Total height of all messages including separators.
     fn total_height(&self, area_width: u16) -> u16 {
-        let content_width = area_width.saturating_sub(LEFT_INDENT);
-        if content_width == 0 {
+        let text_width = area_width.saturating_sub(self.h_overhead());
+        if text_width == 0 {
             return 0;
         }
         let mut total: u16 = 0;
         for (i, msg) in self.messages.iter().enumerate() {
-            total = total.saturating_add(self.message_height(&msg.content, content_width));
+            total = total.saturating_add(self.message_height(&msg.content, text_width));
             if i + 1 < self.messages.len() {
                 total = total.saturating_add(1); // separator
             }
@@ -107,13 +121,15 @@ impl MessageList {
             }
         }
 
+        let text_x = area.x + BORDER_WIDTH + self.padding.left;
+        let text_width = area.width.saturating_sub(self.h_overhead());
+
         if self.messages.is_empty() {
             let hint = "Type a message and press Enter";
             let hint_style = self.theme.muted_style();
-            let x = area.x + LEFT_INDENT;
             let y = area.y + area.height / 2;
             for (i, ch) in hint.chars().enumerate() {
-                let px = x + i as u16;
+                let px = text_x + i as u16;
                 if px >= area.x + area.width {
                     break;
                 }
@@ -125,8 +141,7 @@ impl MessageList {
             return;
         }
 
-        let content_width = area.width.saturating_sub(LEFT_INDENT);
-        if content_width == 0 {
+        if text_width == 0 {
             return;
         }
 
@@ -134,7 +149,7 @@ impl MessageList {
         let mut msg_heights: Vec<u16> = Vec::with_capacity(self.messages.len());
         let mut total_height: u16 = 0;
         for (i, msg) in self.messages.iter().enumerate() {
-            let h = self.message_height(&msg.content, content_width);
+            let h = self.message_height(&msg.content, text_width);
             msg_heights.push(h);
             total_height = total_height.saturating_add(h);
             if i + 1 < self.messages.len() {
@@ -170,6 +185,7 @@ impl MessageList {
                 let render_height = screen_bottom.saturating_sub(screen_top);
 
                 if render_height > 0 {
+                    // Draw left border for all rows of this message
                     let border_style = self.border_color(msg.role);
                     for y in screen_top..screen_bottom {
                         if let Some(cell) = buf.cell_mut((area.x, y)) {
@@ -178,19 +194,23 @@ impl MessageList {
                         }
                     }
 
+                    // Text area sits inside the padding
                     let text_area = Rect {
-                        x: area.x + LEFT_INDENT,
-                        y: screen_top,
-                        width: content_width,
-                        height: render_height,
+                        x: text_x,
+                        y: screen_top + self.padding.top,
+                        width: text_width,
+                        height: render_height.saturating_sub(self.padding.vertical()),
                     };
 
-                    let skip_lines = content_top.saturating_sub(msg_top);
+                    // Skip lines accounts for both scroll and top padding
+                    let skip_lines = content_top.saturating_sub(msg_top + self.padding.top);
 
-                    let paragraph = Paragraph::new(Text::styled(&msg.content, text_style))
-                        .wrap(Wrap { trim: false })
-                        .scroll((skip_lines, 0));
-                    paragraph.render(text_area, buf);
+                    if text_area.height > 0 {
+                        let paragraph = Paragraph::new(Text::styled(&msg.content, text_style))
+                            .wrap(Wrap { trim: false })
+                            .scroll((skip_lines, 0));
+                        paragraph.render(text_area, buf);
+                    }
                 }
             }
 

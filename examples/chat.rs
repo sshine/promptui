@@ -15,8 +15,9 @@ use tokio::sync::mpsc;
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
+use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
-use promptui_core::widgets::text_field::{Padding, TextField, TextFieldAction};
+use promptui_core::widgets::text_field::{TextField, TextFieldAction};
 
 /// The 4 border colors cycled by Tab.
 const BORDER_COLORS: [Color; 4] = [
@@ -89,9 +90,12 @@ impl App {
         text_field.set_max_height(8);
         text_field.set_border_color(BORDER_COLORS[0]);
 
+        let mut message_list = MessageList::new(theme);
+        message_list.set_padding(Padding::symmetric(1, 0));
+
         Self {
             text_field,
-            message_list: MessageList::new(theme),
+            message_list,
             scroll_box: ScrollBox::new(),
             should_quit: false,
             theme,
