@@ -7,7 +7,6 @@ use unicode_width::UnicodeWidthChar;
 use crate::input::Input;
 use crate::theme::Theme;
 use crate::widgets::scrollbar::Scrollbar;
-use crate::widgets::word;
 use crate::widgets::word_wrap::{count_wrapped_lines, wrap_lines};
 
 /// Left border character matching OpenCode's style.
@@ -190,26 +189,74 @@ impl TextField {
         total
     }
 
-    /// Visual line index where the cursor sits.
-    fn cursor_visual_line(&self, wrap_width: u16) -> u16 {
+    /// Returns (visual_line_index, display_column) for the current cursor.
+    ///
+    /// At a wrap boundary the cursor belongs to the start of the next visual line.
+    /// At the end of a logical line the cursor belongs to the last visual line.
+    fn cursor_visual_position(&self, wrap_width: u16) -> (u16, u16) {
         let mut visual_row: u16 = 0;
         for (i, line) in self.lines.iter().enumerate() {
             if i == self.cursor.0 {
-                // Find which visual line within this logical line
                 let ranges = wrap_lines(line, wrap_width);
                 let mut chars_counted: usize = 0;
                 for (range_idx, &(start, end)) in ranges.iter().enumerate() {
                     let seg_chars = line[start..end].chars().count();
-                    if self.cursor.1 < chars_counted + seg_chars || range_idx == ranges.len() - 1 {
-                        return visual_row + range_idx as u16;
+                    let is_last = range_idx == ranges.len() - 1;
+                    if self.cursor.1 < chars_counted + seg_chars || is_last {
+                        let col_in_seg = self.cursor.1.saturating_sub(chars_counted);
+                        let display_col: u16 = line[start..]
+                            .chars()
+                            .take(col_in_seg)
+                            .map(|c| c.width().unwrap_or(0) as u16)
+                            .sum();
+                        return (visual_row + range_idx as u16, display_col);
                     }
                     chars_counted += seg_chars;
                 }
-                return visual_row;
+                return (visual_row, 0);
             }
-            visual_row = visual_row.saturating_add(count_wrapped_lines(line, wrap_width));
+            visual_row += count_wrapped_lines(line, wrap_width);
         }
-        visual_row
+        (visual_row, 0)
+    }
+
+    /// Visual line index where the cursor sits.
+    fn cursor_visual_line(&self, wrap_width: u16) -> u16 {
+        self.cursor_visual_position(wrap_width).0
+    }
+
+    /// Map a target visual line and display column to a logical cursor (row, char_offset).
+    fn visual_to_cursor(
+        &self,
+        target_visual: u16,
+        target_display_col: u16,
+        wrap_width: u16,
+    ) -> (usize, usize) {
+        let mut visual_line: u16 = 0;
+        for (line_idx, line) in self.lines.iter().enumerate() {
+            let ranges = wrap_lines(line, wrap_width);
+            for &(start, end) in &ranges {
+                if visual_line == target_visual {
+                    let segment = &line[start..end];
+                    let chars_before_segment = line[..start].chars().count();
+                    let mut col: u16 = 0;
+                    let mut char_count: usize = 0;
+                    for ch in segment.chars() {
+                        let w = ch.width().unwrap_or(0) as u16;
+                        if col + w > target_display_col {
+                            break;
+                        }
+                        col += w;
+                        char_count += 1;
+                    }
+                    return (line_idx, chars_before_segment + char_count);
+                }
+                visual_line += 1;
+            }
+        }
+        let last_row = self.lines.len().saturating_sub(1);
+        let last_col = self.lines.last().map_or(0, |l| l.chars().count());
+        (last_row, last_col)
     }
 
     /// Adjust scroll_offset so the cursor is visible within the given height.
@@ -281,7 +328,6 @@ impl TextField {
     /// Process an input event. Returns what action resulted.
     pub fn input(&mut self, input: Input) -> TextFieldAction {
         match input {
-            // --- Text insertion ---
             Input::Char(c) => {
                 self.insert_char(c);
                 TextFieldAction::Edited
@@ -299,7 +345,6 @@ impl TextField {
                 TextFieldAction::Edited
             }
 
-            // --- Character deletion ---
             Input::Backspace => {
                 if self.delete_backward() {
                     TextFieldAction::Edited
@@ -314,38 +359,6 @@ impl TextField {
                     TextFieldAction::Ignored
                 }
             }
-
-            // --- Word deletion ---
-            Input::DeleteWordBackward => {
-                if self.delete_word_backward() {
-                    TextFieldAction::Edited
-                } else {
-                    TextFieldAction::Ignored
-                }
-            }
-            Input::DeleteWordForward => {
-                if self.delete_word_forward() {
-                    TextFieldAction::Edited
-                } else {
-                    TextFieldAction::Ignored
-                }
-            }
-
-            // --- Line deletion ---
-            Input::KillToEnd => {
-                if self.kill_to_end() {
-                    TextFieldAction::Edited
-                } else {
-                    TextFieldAction::Ignored
-                }
-            }
-            Input::KillToStart => {
-                if self.kill_to_start() {
-                    TextFieldAction::Edited
-                } else {
-                    TextFieldAction::Ignored
-                }
-            }
             Input::ClearAll => {
                 if self.lines.len() == 1 && self.lines[0].is_empty() {
                     return TextFieldAction::Ignored;
@@ -354,7 +367,6 @@ impl TextField {
                 TextFieldAction::Edited
             }
 
-            // --- Cursor movement ---
             Input::Left => {
                 self.move_left();
                 TextFieldAction::Edited
@@ -377,14 +389,6 @@ impl TextField {
             }
             Input::End => {
                 self.cursor.1 = self.current_line_char_len();
-                TextFieldAction::Edited
-            }
-            Input::WordForward => {
-                self.move_word_forward();
-                TextFieldAction::Edited
-            }
-            Input::WordBackward => {
-                self.move_word_backward();
                 TextFieldAction::Edited
             }
 
@@ -458,83 +462,6 @@ impl TextField {
         false
     }
 
-    // --- Word deletion ---
-
-    fn delete_word_backward(&mut self) -> bool {
-        let (row, col) = self.cursor;
-        if col == 0 {
-            // At line start: join with previous line (same as backspace)
-            return self.delete_backward();
-        }
-        if let Some(line) = self.lines.get_mut(row) {
-            let new_col = word::find_word_start_backward(line, col);
-            let start_byte = char_to_byte_index(line, new_col);
-            let end_byte = char_to_byte_index(line, col);
-            line.drain(start_byte..end_byte);
-            self.cursor.1 = new_col;
-            return true;
-        }
-        false
-    }
-
-    fn delete_word_forward(&mut self) -> bool {
-        let (row, col) = self.cursor;
-        let line_len = self.current_line_char_len();
-        if col >= line_len {
-            // At line end: join with next line (same as delete)
-            return self.delete_forward();
-        }
-        if let Some(line) = self.lines.get_mut(row) {
-            let end_col = word::find_word_end_forward(line, col);
-            let start_byte = char_to_byte_index(line, col);
-            let end_byte = char_to_byte_index(line, end_col);
-            line.drain(start_byte..end_byte);
-            return true;
-        }
-        false
-    }
-
-    // --- Line deletion ---
-
-    /// Delete from cursor to end of line (Ctrl+K).
-    fn kill_to_end(&mut self) -> bool {
-        let (row, col) = self.cursor;
-        let line_len = self.current_line_char_len();
-        if col < line_len {
-            // Kill text after cursor on this line
-            if let Some(line) = self.lines.get_mut(row) {
-                let byte_idx = char_to_byte_index(line, col);
-                line.truncate(byte_idx);
-                return true;
-            }
-        } else if row + 1 < self.lines.len() {
-            // At end of line: join with next line
-            let next = self.lines.remove(row + 1);
-            if let Some(current) = self.lines.get_mut(row) {
-                current.push_str(&next);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Delete from cursor to start of line (Ctrl+J).
-    fn kill_to_start(&mut self) -> bool {
-        let (row, col) = self.cursor;
-        if col > 0 {
-            if let Some(line) = self.lines.get_mut(row) {
-                let byte_idx = char_to_byte_index(line, col);
-                line.drain(..byte_idx);
-                self.cursor.1 = 0;
-                return true;
-            }
-        } else if row > 0 {
-            // At start of line: join with previous line
-            return self.delete_backward();
-        }
-        false
-    }
-
     // --- Cursor movement ---
 
     fn move_left(&mut self) {
@@ -559,60 +486,25 @@ impl TextField {
     }
 
     fn move_up(&mut self) {
-        let (row, _col) = self.cursor;
-        if row > 0 {
-            self.cursor.0 -= 1;
-            let max_col = self
-                .lines
-                .get(self.cursor.0)
-                .map_or(0, |l| l.chars().count());
-            self.cursor.1 = self.cursor.1.min(max_col);
+        let wrap_w = self.wrap_width();
+        if wrap_w == 0 {
+            return;
+        }
+        let (vis_line, display_col) = self.cursor_visual_position(wrap_w);
+        if vis_line > 0 {
+            self.cursor = self.visual_to_cursor(vis_line - 1, display_col, wrap_w);
         }
     }
 
     fn move_down(&mut self) {
-        let (row, _col) = self.cursor;
-        if row + 1 < self.lines.len() {
-            self.cursor.0 += 1;
-            let max_col = self
-                .lines
-                .get(self.cursor.0)
-                .map_or(0, |l| l.chars().count());
-            self.cursor.1 = self.cursor.1.min(max_col);
-        }
-    }
-
-    fn move_word_forward(&mut self) {
-        let (row, col) = self.cursor;
-        let line_len = self.current_line_char_len();
-        if col >= line_len {
-            // At end of line: move to start of next line
-            if row + 1 < self.lines.len() {
-                self.cursor.0 += 1;
-                self.cursor.1 = 0;
-            }
+        let wrap_w = self.wrap_width();
+        if wrap_w == 0 {
             return;
         }
-        if let Some(line) = self.lines.get(row) {
-            self.cursor.1 = word::find_word_end_forward(line, col);
-        }
-    }
-
-    fn move_word_backward(&mut self) {
-        let (row, col) = self.cursor;
-        if col == 0 {
-            // At start of line: move to end of previous line
-            if row > 0 {
-                self.cursor.0 -= 1;
-                self.cursor.1 = self
-                    .lines
-                    .get(self.cursor.0)
-                    .map_or(0, |l| l.chars().count());
-            }
-            return;
-        }
-        if let Some(line) = self.lines.get(row) {
-            self.cursor.1 = word::find_word_start_backward(line, col);
+        let (vis_line, display_col) = self.cursor_visual_position(wrap_w);
+        let total = self.total_visual_lines(wrap_w);
+        if vis_line + 1 < total {
+            self.cursor = self.visual_to_cursor(vis_line + 1, display_col, wrap_w);
         }
     }
 
@@ -671,9 +563,10 @@ impl Widget for &TextField {
 
         for (line_idx, line) in self.lines.iter().enumerate() {
             let ranges = wrap_lines(line, wrap_w);
+            let num_ranges = ranges.len();
 
             let mut chars_counted: usize = 0;
-            for &(start, end) in &ranges {
+            for (range_idx, &(start, end)) in ranges.iter().enumerate() {
                 let in_viewport = visual_line >= self.scroll_offset
                     && visual_line < self.scroll_offset + visible_rows;
 
@@ -709,11 +602,15 @@ impl Widget for &TextField {
                         x += ch_width;
                     }
 
-                    // Draw cursor at end of segment if needed
+                    // Draw cursor at end of segment only for the LAST segment of
+                    // a logical line. At wrap boundaries the cursor belongs to the
+                    // start of the next visual line, not the end of this one.
                     let segment_char_count = segment.chars().count();
+                    let is_last_segment = range_idx == num_ranges - 1;
                     let is_cursor_at_end = self.focused
                         && line_idx == self.cursor.0
                         && self.cursor.1 == chars_counted + segment_char_count
+                        && is_last_segment
                         && x < area.x
                             + area
                                 .width
@@ -750,6 +647,27 @@ fn char_to_byte_index(s: &str, char_idx: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tf_with(text: &str) -> TextField {
+        let mut tf = TextField::new(Theme::default());
+        for c in text.chars() {
+            if c == '\n' {
+                tf.input(Input::Newline);
+            } else {
+                tf.input(Input::Char(c));
+            }
+        }
+        tf
+    }
+
+    /// Build a TextField with the given text, zero padding, and a specific widget width
+    /// so that `last_content_width` (and therefore `wrap_width()`) is set.
+    fn tf_with_width(text: &str, widget_width: u16) -> TextField {
+        let mut tf = tf_with(text);
+        tf.set_padding(Padding::uniform(0));
+        tf.required_height(widget_width);
+        tf
+    }
 
     #[test]
     fn new_text_field_is_empty() {
@@ -885,28 +803,18 @@ mod tests {
         // Cursor is on line 5 (index 4), viewport is 3 lines
         let h = tf.required_height(80);
         assert_eq!(h, 3); // capped
-        // scroll_offset should be adjusted so cursor (visual line 4) is visible
-        // viewport: [scroll_offset .. scroll_offset + 3)
-        // cursor at visual line 4 → scroll_offset >= 2
         assert!(tf.scroll_offset >= 2, "scroll_offset={}", tf.scroll_offset);
     }
-
-    // --- Cursor-aware wrapping regression tests ---
 
     #[test]
     fn height_grows_before_cursor_hits_edge() {
         let mut tf = TextField::new(Theme::default());
         tf.set_padding(Padding::uniform(0));
-        // Widget width 12: border(1) + scrollbar(1) = 2 overhead
-        // → content_width=10, wrap_width=9
         for c in "abcdefghi".chars() {
             tf.input(Input::Char(c));
         }
-        // 9 chars in wrap_width=9 → fits in 1 line → min 3
         assert_eq!(tf.required_height(12), 3);
-
         tf.input(Input::Char('j'));
-        // 10 chars in wrap_width=9 → 2 lines → still min 3
         assert_eq!(tf.required_height(12), 3);
     }
 
@@ -914,147 +822,22 @@ mod tests {
     fn wrapping_with_cursor_reserve_at_exact_boundary() {
         let mut tf = TextField::new(Theme::default());
         tf.set_padding(Padding::uniform(0));
-        // Widget width 7: border(1) + scrollbar(1) = 2 overhead
-        // → content_width=5, wrap_width=4
         for c in "abcd".chars() {
             tf.input(Input::Char(c));
         }
         tf.input(Input::Char('e'));
-        // "abcde" in wrap_width 4 → 2 visual lines
-        assert_eq!(tf.required_height(7), 3); // min
-
+        assert_eq!(tf.required_height(7), 3);
         let wrap_w = tf.wrap_width();
         assert_eq!(wrap_w, 4);
         let lines = crate::widgets::word_wrap::count_wrapped_lines("abcde", wrap_w);
         assert_eq!(lines, 2);
     }
 
-    // --- Word operations ---
-
-    fn tf_with(text: &str) -> TextField {
-        let mut tf = TextField::new(Theme::default());
-        for c in text.chars() {
-            if c == '\n' {
-                tf.input(Input::Newline);
-            } else {
-                tf.input(Input::Char(c));
-            }
-        }
-        tf
-    }
-
-    #[test]
-    fn delete_word_backward_simple() {
-        let mut tf = tf_with("hello world");
-        // Cursor at end (0, 11)
-        tf.input(Input::DeleteWordBackward);
-        assert_eq!(tf.content(), "hello ");
-        assert_eq!(tf.cursor.1, 6);
-    }
-
-    #[test]
-    fn delete_word_backward_at_start() {
-        let mut tf = tf_with("hello");
-        tf.cursor.1 = 0;
-        // At start of only line: nothing to delete
-        assert_eq!(
-            tf.input(Input::DeleteWordBackward),
-            TextFieldAction::Ignored
-        );
-    }
-
-    #[test]
-    fn delete_word_forward_simple() {
-        let mut tf = tf_with("hello world");
-        tf.cursor.1 = 0;
-        tf.input(Input::DeleteWordForward);
-        assert_eq!(tf.content(), "world");
-    }
-
-    #[test]
-    fn delete_word_forward_at_end() {
-        let mut tf = tf_with("hello");
-        // At end: nothing to delete (no next line)
-        assert_eq!(tf.input(Input::DeleteWordForward), TextFieldAction::Ignored);
-    }
-
-    #[test]
-    fn kill_to_end_of_line() {
-        let mut tf = tf_with("hello world");
-        tf.cursor.1 = 5; // after "hello"
-        tf.input(Input::KillToEnd);
-        assert_eq!(tf.content(), "hello");
-        assert_eq!(tf.cursor.1, 5);
-    }
-
-    #[test]
-    fn kill_to_end_joins_next_line() {
-        let mut tf = tf_with("hello\nworld");
-        tf.cursor = (0, 5); // end of first line
-        tf.input(Input::KillToEnd);
-        assert_eq!(tf.content(), "helloworld");
-    }
-
-    #[test]
-    fn kill_to_start_of_line() {
-        let mut tf = tf_with("hello world");
-        tf.cursor.1 = 6; // before "world"
-        tf.input(Input::KillToStart);
-        assert_eq!(tf.content(), "world");
-        assert_eq!(tf.cursor.1, 0);
-    }
-
-    #[test]
-    fn kill_to_start_joins_prev_line() {
-        let mut tf = tf_with("hello\nworld");
-        tf.cursor = (1, 0); // start of second line
-        tf.input(Input::KillToStart);
-        assert_eq!(tf.content(), "helloworld");
-    }
-
-    #[test]
-    fn word_forward_navigation() {
-        let mut tf = tf_with("hello world foo");
-        tf.cursor.1 = 0;
-        tf.input(Input::WordForward);
-        assert_eq!(tf.cursor.1, 6); // after "hello "
-        tf.input(Input::WordForward);
-        assert_eq!(tf.cursor.1, 12); // after "world "
-        tf.input(Input::WordForward);
-        assert_eq!(tf.cursor.1, 15); // end
-    }
-
-    #[test]
-    fn word_backward_navigation() {
-        let mut tf = tf_with("hello world foo");
-        // cursor at end (15)
-        tf.input(Input::WordBackward);
-        assert_eq!(tf.cursor.1, 12); // start of "foo"
-        tf.input(Input::WordBackward);
-        assert_eq!(tf.cursor.1, 6); // start of "world"
-        tf.input(Input::WordBackward);
-        assert_eq!(tf.cursor.1, 0); // start
-    }
-
-    #[test]
-    fn word_forward_crosses_lines() {
-        let mut tf = tf_with("hello\nworld");
-        tf.cursor = (0, 5); // end of first line
-        tf.input(Input::WordForward);
-        assert_eq!(tf.cursor, (1, 0)); // start of next line
-    }
-
-    #[test]
-    fn word_backward_crosses_lines() {
-        let mut tf = tf_with("hello\nworld");
-        tf.cursor = (1, 0); // start of second line
-        tf.input(Input::WordBackward);
-        assert_eq!(tf.cursor, (0, 5)); // end of first line
-    }
-
     #[test]
     fn up_down_move_between_logical_lines() {
         let mut tf = tf_with("aaa\nbbb\nccc");
+        tf.set_padding(Padding::uniform(0));
+        tf.required_height(80);
         tf.cursor = (2, 2);
         tf.input(Input::Up);
         assert_eq!(tf.cursor, (1, 2));
@@ -1062,5 +845,66 @@ mod tests {
         assert_eq!(tf.cursor, (0, 2));
         tf.input(Input::Down);
         assert_eq!(tf.cursor, (1, 2));
+    }
+
+    // ====================================================================
+    // Regression tests for bugs that should FAIL with current broken code
+    // ====================================================================
+
+    // --- Bug: up/down ignores visual wrapped lines ---
+
+    #[test]
+    fn down_moves_across_visual_wrapped_lines() {
+        // Widget width 6: border(1)+scrollbar(1)=2 overhead → content=4, wrap=3
+        // "abcdef" → wrap_lines at width 3: ["abc", "def"]
+        let mut tf = tf_with_width("abcdef", 6);
+        assert_eq!(tf.wrap_width(), 3);
+        tf.cursor = (0, 1); // visual line 0, display col 1
+        tf.input(Input::Down);
+        // Should move to visual line 1, display col 1 → char 3+1=4
+        assert_eq!(tf.cursor, (0, 4));
+    }
+
+    #[test]
+    fn up_moves_across_visual_wrapped_lines() {
+        // "abcdef" at wrap_width 3 → ["abc", "def"]
+        let mut tf = tf_with_width("abcdef", 6);
+        assert_eq!(tf.wrap_width(), 3);
+        // Cursor at end → (0, 6) on visual line 1
+        assert_eq!(tf.cursor, (0, 6));
+        tf.input(Input::Up);
+        // Should move to visual line 0, display col 3 (clamped to segment end)
+        assert_eq!(tf.cursor.0, 0);
+        assert!(tf.cursor.1 <= 3, "cursor.1={}", tf.cursor.1);
+    }
+
+    // --- Bug: double cursor rendered at wrap boundary ---
+
+    #[test]
+    fn no_double_cursor_at_wrap_boundary() {
+        // "abcdef" at wrap_width 3 → ["abc", "def"]
+        // Place cursor at position 3 (start of "def" = wrap boundary)
+        let mut tf = tf_with_width("abcdef", 6);
+        tf.cursor = (0, 3);
+
+        let area = Rect::new(0, 0, 6, 3);
+        let mut buf = Buffer::empty(area);
+        (&tf).render(area, &mut buf);
+
+        let mut reversed_count = 0;
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    if cell.style().add_modifier.contains(Modifier::REVERSED) {
+                        reversed_count += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            reversed_count, 1,
+            "cursor should appear exactly once, got {}",
+            reversed_count
+        );
     }
 }

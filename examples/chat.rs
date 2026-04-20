@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
+use promptui_core::widgets::scroll_box::ScrollBox;
 use promptui_core::widgets::text_field::{Padding, TextField, TextFieldAction};
 
 /// The 4 border colors cycled by Tab.
@@ -74,6 +75,7 @@ impl EventHandler {
 struct App {
     text_field: TextField,
     message_list: MessageList,
+    scroll_box: ScrollBox,
     should_quit: bool,
     theme: Theme,
     border_color_idx: usize,
@@ -90,6 +92,7 @@ impl App {
         Self {
             text_field,
             message_list: MessageList::new(theme),
+            scroll_box: ScrollBox::new(),
             should_quit: false,
             theme,
             border_color_idx: 0,
@@ -125,13 +128,16 @@ impl App {
                 // Compute dynamic text field height
                 let input_height = self.text_field.required_height(area.width);
 
-                // Split: messages on top, input at bottom
+                // Split: scroll box on top, input at bottom
                 let chunks =
                     Layout::vertical([Constraint::Min(3), Constraint::Length(input_height)])
                         .split(area);
 
-                // Render widgets
-                (&self.message_list).render(chunks[0], frame.buffer_mut());
+                // Render scroll box with message list
+                self.scroll_box
+                    .render(chunks[0], frame.buffer_mut(), &self.message_list);
+
+                // Render text field
                 (&self.text_field).render(chunks[1], frame.buffer_mut());
 
                 // Set cursor
@@ -150,19 +156,22 @@ impl App {
                     match input {
                         Input::Esc => self.should_quit = true,
                         Input::Tab => self.cycle_border_color(),
+                        Input::PageUp => self.scroll_box.page_up(),
+                        Input::PageDown => self.scroll_box.page_down(),
                         _ => {
                             if let TextFieldAction::Submit(content) = self.text_field.input(input) {
                                 self.message_list.push(Message {
                                     role: Role::User,
                                     content,
                                 });
+                                self.scroll_box.scroll_to_bottom();
                             }
                         }
                     }
                 }
                 Some(AppEvent::Terminal(Event::Mouse(mouse))) => match mouse.kind {
-                    MouseEventKind::ScrollUp => self.message_list.scroll_up(3),
-                    MouseEventKind::ScrollDown => self.message_list.scroll_down(3),
+                    MouseEventKind::ScrollUp => self.scroll_box.scroll_up(3),
+                    MouseEventKind::ScrollDown => self.scroll_box.scroll_down(3),
                     _ => {}
                 },
                 Some(AppEvent::Terminal(Event::Resize(_, _))) => {
