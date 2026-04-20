@@ -9,37 +9,46 @@ use crate::widgets::padding::Padding;
 /// Agent operating mode, cycled by Tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    /// Talk-only: conversation without changes.
+    Talk,
+    /// Planning: reason about approach, don't execute.
     Plan,
-    Ask,
+    /// Accept: act with explicit permission per action.
     Accept,
-    Yolo,
+    /// Auto: act autonomously within guardrails.
+    Auto,
+    /// Ralph: no limits, full send.
+    Ralph,
 }
 
 impl Mode {
     pub fn label(&self) -> &'static str {
         match self {
+            Mode::Talk => "Talk",
             Mode::Plan => "Plan",
-            Mode::Ask => "Ask",
             Mode::Accept => "Accept",
-            Mode::Yolo => "Yolo",
+            Mode::Auto => "Auto",
+            Mode::Ralph => "Ralph",
         }
     }
 
     pub fn color(&self, theme: &Theme) -> Color {
         match self {
-            Mode::Plan => theme.primary,
-            Mode::Ask => theme.secondary,
-            Mode::Accept => theme.accent,
-            Mode::Yolo => theme.success,
+            Mode::Talk => theme.info,        // cyan
+            Mode::Plan => theme.primary,     // orange
+            Mode::Accept => theme.secondary, // blue
+            Mode::Auto => theme.success,     // green
+            Mode::Ralph => theme.accent,     // purple
         }
     }
 
     pub fn next(&self) -> Self {
         match self {
-            Mode::Plan => Mode::Ask,
-            Mode::Ask => Mode::Accept,
-            Mode::Accept => Mode::Yolo,
-            Mode::Yolo => Mode::Plan,
+            Mode::Talk => Mode::Plan,
+            Mode::Plan => Mode::Accept,
+            Mode::Accept => Mode::Auto,
+            Mode::Auto => Mode::Ralph,
+            Mode::Ralph => Mode::Talk,
         }
     }
 }
@@ -91,7 +100,7 @@ pub struct StatusBar {
 impl StatusBar {
     pub fn new(theme: Theme, context_window: usize) -> Self {
         Self {
-            mode: Mode::Plan,
+            mode: Mode::Talk,
             context: ContextState::new(context_window),
             cwd: String::new(),
             padding: Padding::uniform(0),
@@ -216,23 +225,29 @@ impl Widget for &StatusBar {
         }
 
         // --- Right segments: "cwd · Nk tokens (N.N%)" ---
+        // Graceful degradation: try full text, then drop cwd, then drop everything.
         let tokens = format_token_count(self.context.word_count());
         let pct = self.context.usage_percent();
         let context_text = format!("{tokens} tokens ({pct:.1}%)");
         let display_cwd = self.display_cwd();
 
-        let right_text = if display_cwd.is_empty() {
-            context_text
+        let full_right = if display_cwd.is_empty() {
+            context_text.clone()
         } else {
             format!("{display_cwd}{sep}{context_text}")
         };
 
+        // Pick the longest variant that fits
+        let right_text = if x_max.saturating_sub(x) > full_right.len() as u16 {
+            full_right
+        } else if x_max.saturating_sub(x) > context_text.len() as u16 {
+            context_text
+        } else {
+            return; // nothing fits
+        };
+
         let right_len = right_text.len() as u16;
         let right_start = x_max.saturating_sub(right_len);
-
-        if right_start <= x {
-            return; // not enough room
-        }
 
         // Draw right side character by character with styled sub-segments
         let cwd_len = display_cwd.len();
@@ -272,16 +287,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mode_cycles_through_all_four() {
-        let mut mode = Mode::Plan;
+    fn mode_cycles_through_all_five() {
+        let mut mode = Mode::Talk;
         mode = mode.next();
-        assert_eq!(mode, Mode::Ask);
+        assert_eq!(mode, Mode::Plan);
         mode = mode.next();
         assert_eq!(mode, Mode::Accept);
         mode = mode.next();
-        assert_eq!(mode, Mode::Yolo);
+        assert_eq!(mode, Mode::Auto);
         mode = mode.next();
-        assert_eq!(mode, Mode::Plan);
+        assert_eq!(mode, Mode::Ralph);
+        mode = mode.next();
+        assert_eq!(mode, Mode::Talk);
     }
 
     #[test]
@@ -310,10 +327,10 @@ mod tests {
     fn cycle_mode_returns_color() {
         let theme = Theme::default();
         let mut sb = StatusBar::new(theme, 200_000);
-        assert_eq!(sb.mode(), Mode::Plan);
+        assert_eq!(sb.mode(), Mode::Talk);
         let color = sb.cycle_mode();
-        assert_eq!(sb.mode(), Mode::Ask);
-        assert_eq!(color, theme.secondary);
+        assert_eq!(sb.mode(), Mode::Plan);
+        assert_eq!(color, theme.primary);
     }
 
     #[test]

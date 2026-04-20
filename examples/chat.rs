@@ -136,7 +136,7 @@ impl App {
             self.spinner.tick();
             if self.spinner.is_active() {
                 self.status_bar.set_activity(format!(
-                    "{} {}",
+                    "{}  {}",
                     self.spinner.frame(),
                     self.thinking_verb
                 ));
