@@ -313,6 +313,13 @@ impl TextField {
                     TextFieldAction::Ignored
                 }
             }
+            Input::DeleteWordBackward => {
+                if self.delete_word_backward() {
+                    TextFieldAction::Edited
+                } else {
+                    TextFieldAction::Ignored
+                }
+            }
             Input::ClearAll => {
                 if self.lines.len() == 1 && self.lines[0].is_empty() {
                     return TextFieldAction::Ignored;
@@ -343,6 +350,14 @@ impl TextField {
             }
             Input::End => {
                 self.cursor.1 = self.current_line_char_len();
+                TextFieldAction::Edited
+            }
+            Input::WordForward => {
+                self.move_word_forward();
+                TextFieldAction::Edited
+            }
+            Input::WordBackward => {
+                self.move_word_backward();
                 TextFieldAction::Edited
             }
 
@@ -416,6 +431,24 @@ impl TextField {
         false
     }
 
+    // --- Word deletion ---
+
+    fn delete_word_backward(&mut self) -> bool {
+        let (row, col) = self.cursor;
+        if col == 0 {
+            return self.delete_backward();
+        }
+        if let Some(line) = self.lines.get_mut(row) {
+            let new_col = find_word_start_backward(line, col);
+            let start_byte = char_to_byte_index(line, new_col);
+            let end_byte = char_to_byte_index(line, col);
+            line.drain(start_byte..end_byte);
+            self.cursor.1 = new_col;
+            return true;
+        }
+        false
+    }
+
     // --- Cursor movement ---
 
     fn move_left(&mut self) {
@@ -459,6 +492,38 @@ impl TextField {
         let total = self.total_visual_lines(wrap_w);
         if vis_line + 1 < total {
             self.cursor = self.visual_to_cursor(vis_line + 1, display_col, wrap_w);
+        }
+    }
+
+    fn move_word_forward(&mut self) {
+        let (row, col) = self.cursor;
+        let line_len = self.current_line_char_len();
+        if col >= line_len {
+            if row + 1 < self.lines.len() {
+                self.cursor.0 += 1;
+                self.cursor.1 = 0;
+            }
+            return;
+        }
+        if let Some(line) = self.lines.get(row) {
+            self.cursor.1 = find_word_end_forward(line, col);
+        }
+    }
+
+    fn move_word_backward(&mut self) {
+        let (row, col) = self.cursor;
+        if col == 0 {
+            if row > 0 {
+                self.cursor.0 -= 1;
+                self.cursor.1 = self
+                    .lines
+                    .get(self.cursor.0)
+                    .map_or(0, |l| l.chars().count());
+            }
+            return;
+        }
+        if let Some(line) = self.lines.get(row) {
+            self.cursor.1 = find_word_start_backward(line, col);
         }
     }
 
@@ -589,6 +654,39 @@ impl Widget for &TextField {
             scrollbar.render(sb_area, buf);
         }
     }
+}
+
+/// Find the start of the word before `col` (for Ctrl+Left / Ctrl+Backspace).
+/// Skips whitespace/punctuation backward, then skips word characters backward.
+fn find_word_start_backward(line: &str, col: usize) -> usize {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = col;
+    // Skip whitespace/punctuation
+    while i > 0 && !chars[i - 1].is_alphanumeric() {
+        i -= 1;
+    }
+    // Skip word characters
+    while i > 0 && chars[i - 1].is_alphanumeric() {
+        i -= 1;
+    }
+    i
+}
+
+/// Find the end of the word after `col` (for Ctrl+Right).
+/// Skips word characters forward, then skips whitespace/punctuation forward.
+fn find_word_end_forward(line: &str, col: usize) -> usize {
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut i = col;
+    // Skip word characters
+    while i < len && chars[i].is_alphanumeric() {
+        i += 1;
+    }
+    // Skip whitespace/punctuation
+    while i < len && !chars[i].is_alphanumeric() {
+        i += 1;
+    }
+    i
 }
 
 /// Convert a char offset to a byte index within a string.

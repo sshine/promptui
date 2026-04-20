@@ -26,6 +26,13 @@ pub enum Input {
     PageUp,
     PageDown,
 
+    /// Ctrl+Right: move cursor to next word boundary.
+    WordForward,
+    /// Ctrl+Left: move cursor to previous word boundary.
+    WordBackward,
+    /// Ctrl+Backspace: delete word backward.
+    DeleteWordBackward,
+
     /// Ctrl+U: clear the entire buffer.
     ClearAll,
 
@@ -48,6 +55,13 @@ impl From<KeyEvent> for Input {
 
             KeyCode::Char('c') if ctrl => Input::Esc,
             KeyCode::Char('u') if ctrl => Input::ClearAll,
+
+            // Ctrl+arrow: word navigation
+            KeyCode::Right if ctrl => Input::WordForward,
+            KeyCode::Left if ctrl => Input::WordBackward,
+
+            // Ctrl+Backspace: delete word
+            KeyCode::Backspace if ctrl => Input::DeleteWordBackward,
 
             // Only accept plain chars (no Ctrl/Alt modifiers) to avoid
             // interpreting escape sequences as printable text.
