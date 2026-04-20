@@ -94,6 +94,8 @@ pub struct StatusBar {
     /// Optional spinner frame + verb shown after Mode (e.g. "🌓 Thinking...").
     /// Set to empty string when inactive.
     activity: String,
+    /// Latest request latency in milliseconds, if known.
+    latency_ms: Option<u32>,
     theme: Theme,
 }
 
@@ -105,6 +107,7 @@ impl StatusBar {
             cwd: String::new(),
             padding: Padding::uniform(0),
             activity: String::new(),
+            latency_ms: None,
             theme,
         }
     }
@@ -140,6 +143,10 @@ impl StatusBar {
 
     pub fn set_cwd(&mut self, cwd: String) {
         self.cwd = cwd;
+    }
+
+    pub fn set_latency_ms(&mut self, ms: u32) {
+        self.latency_ms = Some(ms);
     }
 
     /// Shorten the cwd for display: replace home dir with ~, keep last N path components.
@@ -192,7 +199,7 @@ impl Widget for &StatusBar {
             .bg(self.theme.bg)
             .add_modifier(Modifier::BOLD);
 
-        let plan = "Z.ai Coding Plan";
+        // let plan = "Z.ai Coding Plan";
 
         let activity_style = Style::default().fg(self.theme.text).bg(self.theme.bg);
 
@@ -205,8 +212,8 @@ impl Widget for &StatusBar {
 
         left_parts.push((sep, sep_style));
         left_parts.push((model, model_style));
-        left_parts.push((sep, sep_style));
-        left_parts.push((plan, muted_style));
+        // left_parts.push((sep, sep_style));
+        // left_parts.push((plan, muted_style));
 
         let mut x = area.x + self.padding.left;
         let x_max = area.x + area.width.saturating_sub(self.padding.right);
@@ -224,48 +231,49 @@ impl Widget for &StatusBar {
             }
         }
 
-        // --- Right segments: "cwd · Nk tokens (N.N%)" ---
-        // Graceful degradation: try full text, then drop cwd, then drop everything.
+        // --- Right segments: "cwd · 100ms · Nk tokens (N.N%)" ---
+        // Graceful degradation: try full text, then drop cwd, then drop latency, then nothing.
         let tokens = format_token_count(self.context.word_count());
         let pct = self.context.usage_percent();
         let context_text = format!("{tokens} tokens ({pct:.1}%)");
+        let latency_text = self.latency_ms.map(|ms| format!("{ms}ms"));
         let display_cwd = self.display_cwd();
 
-        let full_right = if display_cwd.is_empty() {
-            context_text.clone()
-        } else {
-            format!("{display_cwd}{sep}{context_text}")
-        };
+        // Build right-side segments from most to least expendable
+        let mut parts: Vec<&str> = Vec::new();
+        if !display_cwd.is_empty() {
+            parts.push(display_cwd);
+        }
+        if let Some(ref lt) = latency_text {
+            parts.push(lt);
+        }
+        parts.push(&context_text);
 
-        // Pick the longest variant that fits
-        let right_text = if x_max.saturating_sub(x) > full_right.len() as u16 {
-            full_right
-        } else if x_max.saturating_sub(x) > context_text.len() as u16 {
-            context_text
-        } else {
-            return; // nothing fits
+        let right_text = loop {
+            let candidate = parts.join(sep);
+            if x_max.saturating_sub(x) > candidate.len() as u16 {
+                break candidate;
+            }
+            // Drop the first (leftmost) segment to fit
+            if parts.len() > 1 {
+                parts.remove(0);
+            } else {
+                return; // nothing fits
+            }
         };
 
         let right_len = right_text.len() as u16;
         let right_start = x_max.saturating_sub(right_len);
 
-        // Draw right side character by character with styled sub-segments
-        let cwd_len = display_cwd.len();
+        // Draw right side in muted style with separators
         let mut rx = right_start;
-        for (i, ch) in right_text.chars().enumerate() {
+        for ch in right_text.chars() {
             if rx >= x_max {
                 break;
             }
-            let style = if !display_cwd.is_empty() && i < cwd_len {
-                muted_style
-            } else if !display_cwd.is_empty() && i < cwd_len + sep.len() {
-                sep_style
-            } else {
-                muted_style
-            };
             if let Some(cell) = buf.cell_mut((rx, text_y)) {
                 cell.set_char(ch);
-                cell.set_style(style);
+                cell.set_style(muted_style);
             }
             rx += 1;
         }
