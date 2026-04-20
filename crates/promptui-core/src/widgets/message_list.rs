@@ -61,6 +61,13 @@ impl MessageList {
         self.messages.is_empty()
     }
 
+    /// Replace the content of the last message (e.g. for spinner → real reply).
+    pub fn set_last_content(&mut self, content: String) {
+        if let Some(msg) = self.messages.last_mut() {
+            msg.content = content;
+        }
+    }
+
     /// Total word count across all messages (proxy for token count).
     pub fn total_word_count(&self) -> usize {
         self.messages

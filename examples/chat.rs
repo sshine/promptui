@@ -6,32 +6,33 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use futures::StreamExt;
+use rand::Rng;
 use ratatui::DefaultTerminal;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::widgets::Widget;
 use tokio::sync::mpsc;
 
-use rand::Rng;
-
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
 use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
+use promptui_core::widgets::spinner::{Spinner, SpinnerStyle};
 use promptui_core::widgets::status_bar::StatusBar;
 use promptui_core::widgets::text_field::{TextField, TextFieldAction};
 
 /// Application events.
 enum AppEvent {
-    /// A crossterm terminal event.
     Terminal(Event),
-    /// A periodic tick for rendering.
     Tick,
+    /// A mock reply is ready after the thinking delay.
+    MockReply(String),
 }
 
 /// Reads crossterm events and ticks, sending them to the app.
 struct EventHandler {
+    tx: mpsc::UnboundedSender<AppEvent>,
     rx: mpsc::UnboundedReceiver<AppEvent>,
 }
 
@@ -39,20 +40,21 @@ impl EventHandler {
     fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
+        let tx2 = tx.clone();
         tokio::spawn(async move {
             let mut reader = crossterm::event::EventStream::new();
             let mut tick = tokio::time::interval(tokio::time::Duration::from_millis(33));
 
             loop {
                 tokio::select! {
-                    _ = tx.closed() => break,
+                    _ = tx2.closed() => break,
                     _ = tick.tick() => {
-                        if tx.send(AppEvent::Tick).is_err() {
+                        if tx2.send(AppEvent::Tick).is_err() {
                             break;
                         }
                     }
                     Some(Ok(evt)) = reader.next() => {
-                        if tx.send(AppEvent::Terminal(evt)).is_err() {
+                        if tx2.send(AppEvent::Terminal(evt)).is_err() {
                             break;
                         }
                     }
@@ -60,7 +62,11 @@ impl EventHandler {
             }
         });
 
-        Self { rx }
+        Self { tx, rx }
+    }
+
+    fn sender(&self) -> mpsc::UnboundedSender<AppEvent> {
+        self.tx.clone()
     }
 
     async fn next(&mut self) -> Option<AppEvent> {
@@ -73,6 +79,9 @@ struct App {
     message_list: MessageList,
     scroll_box: ScrollBox,
     status_bar: StatusBar,
+    spinner: Spinner,
+    /// The verb shown while thinking (e.g. "Pondering...").
+    thinking_verb: String,
     should_quit: bool,
     theme: Theme,
 }
@@ -91,7 +100,6 @@ impl App {
         let mut status_bar = StatusBar::new(theme, 200_000);
         status_bar.set_padding(Padding::uniform(1));
         text_field.set_border_color(status_bar.mode().color(&theme));
-        // Set cwd, replacing home dir with ~
         if let Ok(cwd) = std::env::current_dir() {
             let mut display = cwd.display().to_string();
             if let Ok(home) = std::env::var("HOME") {
@@ -107,6 +115,8 @@ impl App {
             message_list,
             scroll_box: ScrollBox::new(),
             status_bar,
+            spinner: Spinner::new(SpinnerStyle::MOON_PHASES),
+            thinking_verb: String::new(),
             should_quit: false,
             theme,
         }
@@ -122,7 +132,16 @@ impl App {
         let mut events = EventHandler::new();
 
         loop {
-            // Update context state from message list
+            // Advance spinner and update status bar activity
+            self.spinner.tick();
+            if self.spinner.is_active() {
+                self.status_bar.set_activity(format!(
+                    "{} {}",
+                    self.spinner.frame(),
+                    self.thinking_verb
+                ));
+            }
+
             self.status_bar
                 .context_mut()
                 .set_word_count(self.message_list.total_word_count());
@@ -130,13 +149,11 @@ impl App {
             terminal.draw(|frame| {
                 let area = frame.area();
 
-                // Fill entire background
                 let bg =
                     ratatui::widgets::Block::default().style(Style::default().bg(self.theme.bg));
                 bg.render(area, frame.buffer_mut());
 
                 let input_height = self.text_field.required_height(area.width);
-
                 let status_height = self.status_bar.height();
                 let chunks = Layout::vertical([
                     Constraint::Min(3),
@@ -175,14 +192,35 @@ impl App {
                                     role: Role::User,
                                     content,
                                 });
-                                self.message_list.push(Message {
-                                    role: Role::Assistant,
-                                    content: mock_reply(),
-                                });
                                 self.scroll_box.scroll_to_bottom();
+
+                                // Start thinking
+                                self.thinking_verb = thinking_verb();
+                                self.spinner.start();
+
+                                // Schedule the reply after 1-3 seconds
+                                let tx = events.sender();
+                                let reply = mock_reply();
+                                let delay_ms = rand::rng().random_range(1000..=3000);
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(
+                                        delay_ms,
+                                    ))
+                                    .await;
+                                    let _ = tx.send(AppEvent::MockReply(reply));
+                                });
                             }
                         }
                     }
+                }
+                Some(AppEvent::MockReply(reply)) => {
+                    self.spinner.stop();
+                    self.status_bar.set_activity(String::new());
+                    self.message_list.push(Message {
+                        role: Role::Assistant,
+                        content: reply,
+                    });
+                    self.scroll_box.scroll_to_bottom();
                 }
                 Some(AppEvent::Terminal(Event::Mouse(mouse))) => match mouse.kind {
                     MouseEventKind::ScrollUp => self.scroll_box.scroll_up(3),
@@ -219,9 +257,27 @@ const MOCK_REPLIES: [&str; 10] = [
     "Fascinating. I'll ponder that and get back to you.",
 ];
 
+const THINKING_VERBS: [&str; 10] = [
+    "Thinking...",
+    "Pondering...",
+    "Mulling...",
+    "Brewing...",
+    "Crafting...",
+    "Dreaming...",
+    "Plotting...",
+    "Scheming...",
+    "Conjuring...",
+    "Awaiting...",
+];
+
 fn mock_reply() -> String {
     let idx = rand::rng().random_range(0..MOCK_REPLIES.len());
     MOCK_REPLIES[idx].to_string()
+}
+
+fn thinking_verb() -> String {
+    let idx = rand::rng().random_range(0..THINKING_VERBS.len());
+    THINKING_VERBS[idx].to_string()
 }
 
 #[tokio::main]

@@ -82,6 +82,9 @@ pub struct StatusBar {
     context: ContextState,
     cwd: String,
     padding: Padding,
+    /// Optional spinner frame + verb shown after Mode (e.g. "🌓 Thinking...").
+    /// Set to empty string when inactive.
+    activity: String,
     theme: Theme,
 }
 
@@ -92,8 +95,15 @@ impl StatusBar {
             context: ContextState::new(context_window),
             cwd: String::new(),
             padding: Padding::uniform(0),
+            activity: String::new(),
             theme,
         }
+    }
+
+    /// Set the activity text shown after Mode (e.g. "🌓 Pondering...").
+    /// Pass an empty string to clear.
+    pub fn set_activity(&mut self, activity: String) {
+        self.activity = activity;
     }
 
     pub fn set_padding(&mut self, padding: Padding) {
@@ -175,13 +185,19 @@ impl Widget for &StatusBar {
 
         let plan = "Z.ai Coding Plan";
 
-        let left_parts: Vec<(&str, Style)> = vec![
-            (mode_label, mode_style),
-            (sep, sep_style),
-            (model, model_style),
-            (sep, sep_style),
-            (plan, muted_style),
-        ];
+        let activity_style = Style::default().fg(self.theme.text).bg(self.theme.bg);
+
+        let mut left_parts: Vec<(&str, Style)> = vec![(mode_label, mode_style)];
+
+        if !self.activity.is_empty() {
+            left_parts.push((sep, sep_style));
+            left_parts.push((&self.activity, activity_style));
+        }
+
+        left_parts.push((sep, sep_style));
+        left_parts.push((model, model_style));
+        left_parts.push((sep, sep_style));
+        left_parts.push((plan, muted_style));
 
         let mut x = area.x + self.padding.left;
         let x_max = area.x + area.width.saturating_sub(self.padding.right);
