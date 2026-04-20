@@ -21,14 +21,15 @@ use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
 use promptui_core::widgets::spinner::{Spinner, SpinnerStyle};
 use promptui_core::widgets::status_bar::StatusBar;
+use promptui_core::widgets::streaming_text::StreamingText;
 use promptui_core::widgets::text_field::{TextField, TextFieldAction};
 
 /// Application events.
 enum AppEvent {
     Terminal(Event),
     Tick,
-    /// A mock reply is ready after the thinking delay.
-    MockReply(String),
+    /// Start streaming a reply after the thinking delay.
+    StreamStart(String),
 }
 
 /// Reads crossterm events and ticks, sending them to the app.
@@ -82,6 +83,7 @@ struct App {
     status_bar: StatusBar,
     spinner: Spinner,
     notice: Notice,
+    streaming: Option<StreamingText>,
     /// The verb shown while thinking (e.g. "Pondering...").
     thinking_verb: String,
     should_quit: bool,
@@ -111,6 +113,7 @@ impl App {
             }
             status_bar.set_cwd(display);
         }
+        status_bar.set_latency_ms(rand::rng().random_range(10..=150));
 
         Self {
             text_field,
@@ -123,6 +126,7 @@ impl App {
                 n.set_padding(Padding::uniform(1));
                 n
             },
+            streaming: None,
             thinking_verb: String::new(),
             should_quit: false,
             theme,
@@ -139,9 +143,22 @@ impl App {
         let mut events = EventHandler::new();
 
         loop {
-            // Advance spinner, toast timer, and update status bar activity
+            // Advance spinner, toast timer, streaming reveal, and update status bar
             self.spinner.tick();
             self.notice.tick();
+            if let Some(ref mut streaming) = self.streaming {
+                if streaming.tick() {
+                    self.message_list
+                        .set_last_content(streaming.revealed_text().to_string());
+                    self.scroll_box.scroll_to_bottom();
+                }
+                if streaming.is_finished() {
+                    // Sync final text and clear streaming state
+                    self.message_list
+                        .set_last_content(streaming.revealed_text().to_string());
+                    self.streaming = None;
+                }
+            }
             if self.spinner.is_active() {
                 self.status_bar.set_activity(format!(
                     "{} {}",
@@ -205,6 +222,9 @@ impl App {
                                 self.notice
                                     .show(NoticeLevel::Error, "Could not connect. Are you online?");
 
+                                self.status_bar
+                                    .set_latency_ms(rand::rng().random_range(10..=150));
+
                                 // Start thinking
                                 self.thinking_verb = thinking_verb();
                                 self.spinner.start();
@@ -218,19 +238,24 @@ impl App {
                                         delay_ms,
                                     ))
                                     .await;
-                                    let _ = tx.send(AppEvent::MockReply(reply));
+                                    let _ = tx.send(AppEvent::StreamStart(reply));
                                 });
                             }
                         }
                     }
                 }
-                Some(AppEvent::MockReply(reply)) => {
+                Some(AppEvent::StreamStart(reply)) => {
                     self.spinner.stop();
                     self.status_bar.set_activity(String::new());
+                    // Push an empty assistant message; streaming will fill it
                     self.message_list.push(Message {
                         role: Role::Assistant,
-                        content: reply,
+                        content: String::new(),
                     });
+                    let mut streaming = StreamingText::new(self.theme);
+                    streaming.push_str(&reply);
+                    streaming.finish();
+                    self.streaming = Some(streaming);
                     self.scroll_box.scroll_to_bottom();
                 }
                 Some(AppEvent::Terminal(Event::Mouse(mouse))) => match mouse.kind {
