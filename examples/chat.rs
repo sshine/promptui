@@ -8,7 +8,7 @@ use crossterm::execute;
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::Widget;
 use tokio::sync::mpsc;
 
@@ -17,15 +17,8 @@ use promptui_core::theme::Theme;
 use promptui_core::widgets::message_list::{Message, MessageList, Role};
 use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
+use promptui_core::widgets::status_bar::StatusBar;
 use promptui_core::widgets::text_field::{TextField, TextFieldAction};
-
-/// The 4 border colors cycled by Tab.
-const BORDER_COLORS: [Color; 4] = [
-    Color::Rgb(250, 178, 131), // primary / orange
-    Color::Rgb(92, 156, 245),  // secondary / blue
-    Color::Rgb(157, 124, 216), // accent / purple
-    Color::Rgb(127, 216, 143), // success / green
-];
 
 /// Application events.
 enum AppEvent {
@@ -77,41 +70,47 @@ struct App {
     text_field: TextField,
     message_list: MessageList,
     scroll_box: ScrollBox,
+    status_bar: StatusBar,
     should_quit: bool,
     theme: Theme,
-    border_color_idx: usize,
 }
 
 impl App {
     fn new() -> Self {
         let theme = Theme::default();
+
         let mut text_field = TextField::new(theme);
         text_field.set_padding(Padding::uniform(1));
         text_field.set_max_height(8);
-        text_field.set_border_color(BORDER_COLORS[0]);
 
         let mut message_list = MessageList::new(theme);
-        message_list.set_padding(Padding::symmetric(1, 0));
+        message_list.set_padding(Padding::uniform(1));
+
+        let mut status_bar = StatusBar::new(theme, 200_000);
+        // Set initial border color from mode
+        text_field.set_border_color(status_bar.mode().color(&theme));
+        // Set cwd, replacing home dir with ~
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut display = cwd.display().to_string();
+            if let Ok(home) = std::env::var("HOME") {
+                if display.starts_with(&home) {
+                    display = format!("~{}", &display[home.len()..]);
+                }
+            }
+            status_bar.set_cwd(display);
+        }
 
         Self {
             text_field,
             message_list,
             scroll_box: ScrollBox::new(),
+            status_bar,
             should_quit: false,
             theme,
-            border_color_idx: 0,
         }
     }
 
-    fn cycle_border_color(&mut self) {
-        self.border_color_idx = (self.border_color_idx + 1) % BORDER_COLORS.len();
-        self.text_field
-            .set_border_color(BORDER_COLORS[self.border_color_idx]);
-    }
-
     async fn run(&mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
-        // Enable enhanced keyboard protocol for Shift+Enter detection.
-        // Falls back gracefully on terminals that don't support it.
         let _ = execute!(
             io::stdout(),
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
@@ -121,6 +120,11 @@ impl App {
         let mut events = EventHandler::new();
 
         loop {
+            // Update context state from message list
+            self.status_bar
+                .context_mut()
+                .set_word_count(self.message_list.total_word_count());
+
             terminal.draw(|frame| {
                 let area = frame.area();
 
@@ -129,37 +133,38 @@ impl App {
                     ratatui::widgets::Block::default().style(Style::default().bg(self.theme.bg));
                 bg.render(area, frame.buffer_mut());
 
-                // Compute dynamic text field height
                 let input_height = self.text_field.required_height(area.width);
 
-                // Split: scroll box on top, input at bottom
-                let chunks =
-                    Layout::vertical([Constraint::Min(3), Constraint::Length(input_height)])
-                        .split(area);
+                // Split: scroll box on top, status bar (1 row), input at bottom
+                let chunks = Layout::vertical([
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                    Constraint::Length(input_height),
+                ])
+                .split(area);
 
-                // Render scroll box with message list
                 self.scroll_box
                     .render(chunks[0], frame.buffer_mut(), &self.message_list);
+                (&self.status_bar).render(chunks[1], frame.buffer_mut());
+                (&self.text_field).render(chunks[2], frame.buffer_mut());
 
-                // Render text field
-                (&self.text_field).render(chunks[1], frame.buffer_mut());
-
-                // Set cursor
-                if let Some(pos) = self.text_field.cursor_position(chunks[1]) {
+                if let Some(pos) = self.text_field.cursor_position(chunks[2]) {
                     frame.set_cursor_position(pos);
                 }
             })?;
 
             match events.next().await {
                 Some(AppEvent::Terminal(Event::Key(key))) => {
-                    // Only handle key press events (not release/repeat)
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
                     let input = Input::from(key);
                     match input {
                         Input::Esc => self.should_quit = true,
-                        Input::Tab => self.cycle_border_color(),
+                        Input::Tab => {
+                            let color = self.status_bar.cycle_mode();
+                            self.text_field.set_border_color(color);
+                        }
                         Input::PageUp => self.scroll_box.page_up(),
                         Input::PageDown => self.scroll_box.page_down(),
                         _ => {
@@ -178,9 +183,7 @@ impl App {
                     MouseEventKind::ScrollDown => self.scroll_box.scroll_down(3),
                     _ => {}
                 },
-                Some(AppEvent::Terminal(Event::Resize(_, _))) => {
-                    // Layout recomputes automatically on next draw
-                }
+                Some(AppEvent::Terminal(Event::Resize(_, _))) => {}
                 Some(AppEvent::Tick) | Some(AppEvent::Terminal(_)) => {}
                 None => break,
             }

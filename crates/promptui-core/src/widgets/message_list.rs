@@ -61,6 +61,14 @@ impl MessageList {
         self.messages.is_empty()
     }
 
+    /// Total word count across all messages (proxy for token count).
+    pub fn total_word_count(&self) -> usize {
+        self.messages
+            .iter()
+            .map(|m| m.content.split_whitespace().count())
+            .sum()
+    }
+
     /// Horizontal overhead per message: border + left padding + right padding.
     fn h_overhead(&self) -> u16 {
         BORDER_WIDTH + self.padding.horizontal()
