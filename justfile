@@ -29,6 +29,9 @@ build:
 demo:
     cargo run -p promptui-examples --bin chat
 
+demo2:
+    cargo run -p promptui-examples --bin demo2
+
 # Generate documentation
 doc *args='':
     cargo doc --no-deps --all-features {{args}}

@@ -23,3 +23,7 @@ path = "hello.rs"
 [[bin]]
 name = "chat"
 path = "chat.rs"
+
+[[bin]]
+name = "demo2"
+path = "demo2.rs"

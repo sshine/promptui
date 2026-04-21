@@ -36,6 +36,9 @@ pub enum Input {
     /// Ctrl+U: clear the entire buffer.
     ClearAll,
 
+    /// Ctrl+A: toggle agent overview focus.
+    CtrlA,
+
     Esc,
     /// An unrecognized key event.
     Unknown,
@@ -55,6 +58,7 @@ impl From<KeyEvent> for Input {
 
             KeyCode::Char('c') if ctrl => Input::Esc,
             KeyCode::Char('u') if ctrl => Input::ClearAll,
+            KeyCode::Char('a') if ctrl => Input::CtrlA,
 
             // Ctrl+arrow: word navigation
             KeyCode::Right if ctrl => Input::WordForward,

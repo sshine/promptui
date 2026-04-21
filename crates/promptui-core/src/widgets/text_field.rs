@@ -61,6 +61,8 @@ pub struct TextField {
     scroll_offset: u16, // visual lines scrolled from top
     last_content_width: u16,
     style_fn: Option<StyleFn>,
+    /// When true, collapses to min_height regardless of content.
+    summary_mode: bool,
 }
 
 impl TextField {
@@ -77,6 +79,7 @@ impl TextField {
             scroll_offset: 0,
             last_content_width: 0,
             style_fn: None,
+            summary_mode: false,
         }
     }
 
@@ -98,6 +101,11 @@ impl TextField {
 
     pub fn set_max_height(&mut self, max: u16) {
         self.max_height = max;
+    }
+
+    /// When true, `required_height` returns `min_height + padding` regardless of content.
+    pub fn set_summary_mode(&mut self, summary: bool) {
+        self.summary_mode = summary;
     }
 
     /// Set a callback for per-character style overrides.
@@ -131,6 +139,10 @@ impl TextField {
     pub fn required_height(&mut self, width: u16) -> u16 {
         let content_width = width.saturating_sub(self.h_overhead());
         self.last_content_width = content_width;
+
+        if self.summary_mode {
+            return self.min_height + self.padding.vertical();
+        }
 
         let wrap_width = content_width.saturating_sub(CURSOR_RESERVE);
         if wrap_width == 0 {
