@@ -16,12 +16,12 @@ use tokio::sync::mpsc;
 
 use promptui_core::input::Input;
 use promptui_core::theme::Theme;
-use promptui_core::widgets::message_list::{Message, MessageList, Role};
+use promptui_core::widgets::message_list::{ContentBlock, Message, MessageList, Role};
 use promptui_core::widgets::notice::{Notice, NoticeLevel};
 use promptui_core::widgets::padding::Padding;
 use promptui_core::widgets::scroll_box::ScrollBox;
 use promptui_core::widgets::spinner::{Spinner, SpinnerStyle};
-use promptui_core::widgets::status_bar::StatusBar;
+use promptui_core::widgets::status_bar::{Mode, StatusBar};
 use promptui_core::widgets::streaming_text::StreamingText;
 use promptui_core::widgets::text_field::{TextField, TextFieldAction};
 
@@ -34,6 +34,15 @@ enum AppEvent {
     /// Shell command finished; carries the command string and its output.
     ShellOutput {
         output: String,
+    },
+    /// Check off the next todo item and post a comment.
+    TodoProgress {
+        /// Index of the TodoList block in the message list.
+        block_index: usize,
+        /// Which item to mark done.
+        item_index: usize,
+        /// Comment to post as an assistant message.
+        comment: String,
     },
 }
 
@@ -268,6 +277,54 @@ impl App {
                                         };
                                         let _ = tx.send(AppEvent::ShellOutput { output });
                                     });
+                                } else if self.status_bar.mode() == Mode::Accept {
+                                    // Accept mode: create a todo list and gradually work through it
+                                    self.message_list.push(Message::plain(Role::User, &content));
+                                    self.scroll_box.scroll_to_bottom();
+
+                                    let items = make_todo_items(&content);
+                                    let block_index = self.message_list.len();
+                                    self.message_list.push_block(ContentBlock::TodoList {
+                                        title: "Plan".to_string(),
+                                        items: items
+                                            .iter()
+                                            .map(|label| (label.clone(), false))
+                                            .collect(),
+                                    });
+                                    self.scroll_box.scroll_to_bottom();
+
+                                    // Schedule gradual progress
+                                    self.thinking_verb = thinking_verb();
+                                    self.spinner.start();
+                                    let tx = events.sender();
+                                    let item_count = items.len();
+                                    // Pre-generate delays and comments (ThreadRng isn't Send)
+                                    let schedule: Vec<(u64, String)> = (0..item_count)
+                                        .map(|i| {
+                                            let delay = rand::rng().random_range(1500..=3500);
+                                            (delay, todo_comment(i, item_count))
+                                        })
+                                        .collect();
+                                    tokio::spawn(async move {
+                                        for (i, (delay, comment)) in
+                                            schedule.into_iter().enumerate()
+                                        {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                                delay,
+                                            ))
+                                            .await;
+                                            if tx
+                                                .send(AppEvent::TodoProgress {
+                                                    block_index,
+                                                    item_index: i,
+                                                    comment,
+                                                })
+                                                .is_err()
+                                            {
+                                                break;
+                                            }
+                                        }
+                                    });
                                 } else {
                                     self.message_list.push(Message::plain(Role::User, content));
                                     self.scroll_box.scroll_to_bottom();
@@ -309,6 +366,47 @@ impl App {
                     streaming.finish();
                     self.streaming = Some(streaming);
                     self.scroll_box.scroll_to_bottom();
+                }
+                Some(AppEvent::TodoProgress {
+                    block_index,
+                    item_index,
+                    comment,
+                }) => {
+                    // Mark the item done in the todo list block
+                    if let Some(ContentBlock::TodoList { items, .. }) =
+                        self.message_list.block_mut(block_index)
+                    {
+                        if let Some(item) = items.get_mut(item_index) {
+                            item.1 = true;
+                        }
+                    }
+
+                    // Post a streamed assistant comment
+                    self.message_list.push(Message::plain(Role::Assistant, ""));
+                    let mut streaming = StreamingText::new(self.theme);
+                    streaming.push_str(&comment);
+                    streaming.finish();
+                    self.streaming = Some(streaming);
+                    self.scroll_box.scroll_to_bottom();
+
+                    // Check if all items are done
+                    let all_done = if let Some(ContentBlock::TodoList { items, .. }) =
+                        self.message_list.blocks().get(block_index)
+                    {
+                        items.iter().all(|(_, done)| *done)
+                    } else {
+                        false
+                    };
+                    if all_done {
+                        self.spinner.stop();
+                        self.status_bar.set_activity(String::new());
+                        self.notice.show(NoticeLevel::Info, "All tasks completed!");
+                    } else {
+                        self.thinking_verb = thinking_verb();
+                    }
+
+                    self.status_bar
+                        .set_latency_ms(rand::rng().random_range(10..=150));
                 }
                 Some(AppEvent::ShellOutput { output }) => {
                     self.spinner.stop();
@@ -372,6 +470,59 @@ fn mock_reply() -> String {
 fn thinking_verb() -> String {
     let idx = rand::rng().random_range(0..THINKING_VERBS.len());
     THINKING_VERBS[idx].to_string()
+}
+
+/// Generate todo items based on the user's message.
+fn make_todo_items(prompt: &str) -> Vec<String> {
+    let word_count = prompt.split_whitespace().count();
+    // Pick a set based on rough length so the demo feels responsive
+    if word_count <= 3 {
+        vec![
+            "Parse request".into(),
+            "Gather context".into(),
+            "Draft response".into(),
+        ]
+    } else if word_count <= 8 {
+        vec![
+            "Analyze requirements".into(),
+            "Search codebase".into(),
+            "Plan changes".into(),
+            "Apply edits".into(),
+            "Verify result".into(),
+        ]
+    } else {
+        vec![
+            "Break down problem".into(),
+            "Research approach".into(),
+            "Draft implementation plan".into(),
+            "Write code changes".into(),
+            "Run tests".into(),
+            "Review diff".into(),
+            "Finalize".into(),
+        ]
+    }
+}
+
+const TODO_COMMENTS: [&str; 10] = [
+    "Done. Moving on to the next step.",
+    "That went smoothly. Continuing...",
+    "Checked. Let me keep going.",
+    "All good here. Next up...",
+    "Finished that part. Onwards!",
+    "Handled. Proceeding to the rest.",
+    "Sorted. On to the next one.",
+    "Wrapped that up. Let's continue.",
+    "Complete. Making progress!",
+    "Taken care of. Almost there...",
+];
+
+fn todo_comment(item_index: usize, total: usize) -> String {
+    if item_index + 1 == total {
+        "All done! Everything looks good.".to_string()
+    } else {
+        let idx = rand::rng().random_range(0..TODO_COMMENTS.len());
+        TODO_COMMENTS[idx].to_string()
+    }
 }
 
 #[tokio::main]
