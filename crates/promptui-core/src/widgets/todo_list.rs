@@ -293,8 +293,8 @@ mod tests {
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
         (&list).render(area, &mut buf);
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), LEFT_BORDER);
-        assert_eq!(buf.cell((0, 1)).unwrap().symbol(), LEFT_BORDER);
+        assert_eq!(buf[(0, 0)].symbol(), LEFT_BORDER);
+        assert_eq!(buf[(0, 1)].symbol(), LEFT_BORDER);
     }
 
     #[test]

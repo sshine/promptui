@@ -68,7 +68,7 @@ impl FocusStack {
     /// The currently focused component (top of stack).
     /// Always returns a value because TextField is permanently at the bottom.
     pub fn top(&self) -> FocusId {
-        *self.stack.last().unwrap()
+        self.stack.last().copied().unwrap_or(FocusId::TextField)
     }
 
     /// Push a component onto the focus stack.

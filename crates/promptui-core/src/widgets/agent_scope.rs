@@ -486,8 +486,8 @@ mod tests {
         let mut buf = Buffer::empty(area);
         (&header).render(area, &mut buf);
         // First two chars should be ━━
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), HORIZONTAL);
-        assert_eq!(buf.cell((1, 0)).unwrap().symbol(), HORIZONTAL);
+        assert_eq!(buf[(0, 0)].symbol(), HORIZONTAL);
+        assert_eq!(buf[(1, 0)].symbol(), HORIZONTAL);
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         (&header).render(area, &mut buf);
         // Should start with ├─
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "├");
+        assert_eq!(buf[(0, 0)].symbol(), "├");
     }
 
     #[test]
@@ -511,7 +511,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         (&header).render(area, &mut buf);
         // Should start with └─
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "└");
+        assert_eq!(buf[(0, 0)].symbol(), "└");
     }
 
     #[test]

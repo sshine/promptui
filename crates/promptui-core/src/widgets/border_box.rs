@@ -299,11 +299,11 @@ impl BorderBox {
             }
 
             // space after title
-            if x < right {
-                if let Some(cell) = buf.cell_mut((x, top)) {
-                    cell.set_char(' ');
-                    cell.set_style(title_style);
-                }
+            if x < right
+                && let Some(cell) = buf.cell_mut((x, top))
+            {
+                cell.set_char(' ');
+                cell.set_style(title_style);
                 // remaining ─ already rendered in the top line loop
             }
         }
@@ -397,7 +397,7 @@ mod tests {
         bbox.render_chrome(area, &mut buf);
         // First column should be ┃ on every row
         for y in 0..3 {
-            let cell = buf.cell((0, y)).unwrap();
+            let cell = &buf[(0, y)];
             assert_eq!(cell.symbol(), LEFT_BAR);
         }
     }
@@ -408,10 +408,10 @@ mod tests {
         let area = Rect::new(0, 0, 10, 4);
         let mut buf = Buffer::empty(area);
         bbox.render_chrome(area, &mut buf);
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), FULL_TOP_LEFT);
-        assert_eq!(buf.cell((9, 0)).unwrap().symbol(), FULL_TOP_RIGHT);
-        assert_eq!(buf.cell((0, 3)).unwrap().symbol(), FULL_BOTTOM_LEFT);
-        assert_eq!(buf.cell((9, 3)).unwrap().symbol(), FULL_BOTTOM_RIGHT);
+        assert_eq!(buf[(0, 0)].symbol(), FULL_TOP_LEFT);
+        assert_eq!(buf[(9, 0)].symbol(), FULL_TOP_RIGHT);
+        assert_eq!(buf[(0, 3)].symbol(), FULL_BOTTOM_LEFT);
+        assert_eq!(buf[(9, 3)].symbol(), FULL_BOTTOM_RIGHT);
     }
 
     #[test]
@@ -420,10 +420,10 @@ mod tests {
         let area = Rect::new(0, 0, 10, 4);
         let mut buf = Buffer::empty(area);
         bbox.render_chrome(area, &mut buf);
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), ROUND_TOP_LEFT);
-        assert_eq!(buf.cell((9, 0)).unwrap().symbol(), ROUND_TOP_RIGHT);
-        assert_eq!(buf.cell((0, 3)).unwrap().symbol(), ROUND_BOTTOM_LEFT);
-        assert_eq!(buf.cell((9, 3)).unwrap().symbol(), ROUND_BOTTOM_RIGHT);
+        assert_eq!(buf[(0, 0)].symbol(), ROUND_TOP_LEFT);
+        assert_eq!(buf[(9, 0)].symbol(), ROUND_TOP_RIGHT);
+        assert_eq!(buf[(0, 3)].symbol(), ROUND_BOTTOM_LEFT);
+        assert_eq!(buf[(9, 3)].symbol(), ROUND_BOTTOM_RIGHT);
     }
 
     #[test]
@@ -434,9 +434,9 @@ mod tests {
         bbox.render_chrome(area, &mut buf);
         // Title should appear on the top row
         // Position: corner(0) + ─(1) + space(2) + T(3) + e(4) + s(5) + t(6)
-        assert_eq!(buf.cell((3, 0)).unwrap().symbol(), "T");
-        assert_eq!(buf.cell((4, 0)).unwrap().symbol(), "e");
-        assert_eq!(buf.cell((5, 0)).unwrap().symbol(), "s");
-        assert_eq!(buf.cell((6, 0)).unwrap().symbol(), "t");
+        assert_eq!(buf[(3, 0)].symbol(), "T");
+        assert_eq!(buf[(4, 0)].symbol(), "e");
+        assert_eq!(buf[(5, 0)].symbol(), "s");
+        assert_eq!(buf[(6, 0)].symbol(), "t");
     }
 }

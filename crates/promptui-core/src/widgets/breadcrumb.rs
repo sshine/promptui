@@ -223,9 +223,8 @@ mod tests {
         bc.push(BreadcrumbSegment::new("main".into(), Color::White));
         bc.push(BreadcrumbSegment::new("research".into(), Color::Blue));
 
-        let popped = bc.pop();
-        assert!(popped.is_some());
-        assert_eq!(popped.unwrap().label, "research");
+        let popped = bc.pop().expect("pop() returns the removed segment");
+        assert_eq!(popped.label, "research");
         assert_eq!(bc.depth(), 1);
         assert!(bc.segments()[0].active);
     }
@@ -249,10 +248,10 @@ mod tests {
         (&bc).render(area, &mut buf);
 
         // "main › research" should be rendered
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "m");
-        assert_eq!(buf.cell((1, 0)).unwrap().symbol(), "a");
-        assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "i");
-        assert_eq!(buf.cell((3, 0)).unwrap().symbol(), "n");
+        assert_eq!(buf[(0, 0)].symbol(), "m");
+        assert_eq!(buf[(1, 0)].symbol(), "a");
+        assert_eq!(buf[(2, 0)].symbol(), "i");
+        assert_eq!(buf[(3, 0)].symbol(), "n");
     }
 
     #[test]

@@ -26,6 +26,12 @@ pub struct ScrollBox {
     last_viewport_height: u16,
 }
 
+impl Default for ScrollBox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScrollBox {
     pub fn new() -> Self {
         Self {

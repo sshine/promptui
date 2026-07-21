@@ -117,10 +117,10 @@ impl Question {
                 .iter()
                 .find(|o| o.selected)
                 .map(|o| {
-                    if let Some(ref text) = o.inline_text {
-                        if !text.is_empty() {
-                            return format!("{}: {}", o.label, text);
-                        }
+                    if let Some(ref text) = o.inline_text
+                        && !text.is_empty()
+                    {
+                        return format!("{}: {}", o.label, text);
                     }
                     o.label.clone()
                 })
@@ -441,12 +441,11 @@ impl Questionnaire {
                 let content = self.inline_field.content();
                 let tab = self.current_tab;
                 let opt = self.focused_option;
-                if let Some(q) = self.questions.get_mut(tab) {
-                    if let Some(o) = q.options.get_mut(opt) {
-                        if o.inline_text.is_some() {
-                            o.inline_text = Some(content);
-                        }
-                    }
+                if let Some(q) = self.questions.get_mut(tab)
+                    && let Some(o) = q.options.get_mut(opt)
+                    && o.inline_text.is_some()
+                {
+                    o.inline_text = Some(content);
                 }
                 self.inline_field.set_focused(false);
             }
@@ -817,11 +816,12 @@ impl Questionnaire {
                             x += 1;
                         }
 
-                        if is_editing && x < text_x + text_width {
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char('\u{2588}');
-                                cell.set_style(primary_style);
-                            }
+                        if is_editing
+                            && x < text_x + text_width
+                            && let Some(cell) = buf.cell_mut((x, y))
+                        {
+                            cell.set_char('\u{2588}');
+                            cell.set_style(primary_style);
                         }
                     }
 
@@ -851,11 +851,12 @@ impl Questionnaire {
                         x += 1;
                     }
 
-                    if is_editing && x < text_x + text_width {
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char('\u{2588}');
-                            cell.set_style(primary_style);
-                        }
+                    if is_editing
+                        && x < text_x + text_width
+                        && let Some(cell) = buf.cell_mut((x, y))
+                    {
+                        cell.set_char('\u{2588}');
+                        cell.set_style(primary_style);
                     }
 
                     y += 1;

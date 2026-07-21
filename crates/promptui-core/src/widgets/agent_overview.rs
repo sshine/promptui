@@ -547,13 +547,13 @@ impl AgentOverview {
             height: area.height.saturating_sub(1),
         };
 
-        if msg_area.height > 0 {
-            if let (Some(ml), Some(sb)) = (
+        if msg_area.height > 0
+            && let (Some(ml), Some(sb)) = (
                 self.agent_messages.get(idx),
                 self.agent_scrolls.get_mut(idx),
-            ) {
-                sb.render(msg_area, buf, ml);
-            }
+            )
+        {
+            sb.render(msg_area, buf, ml);
         }
     }
 }
@@ -747,7 +747,7 @@ impl AgentOverview {
             }
 
             let is_focused = i == self.focused;
-            let indent = (agent.depth * 2) as u16;
+            let indent = agent.depth * 2;
 
             let status_color = match agent.status {
                 AgentStatus::Active => self.theme.success,
