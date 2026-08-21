@@ -18,7 +18,9 @@
           config.hk-nix.package
           pkgs.cargo-watch
           pkgs.cargo-insta
+          pkgs.deadnix
           pkgs.stdenv.cc
+          pkgs.git
           pkgs.just
         ];
 

@@ -4,7 +4,12 @@
 {
   imports = [ inputs.hk-nix.flakeModules.default ];
   perSystem =
-    { config, lib, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      ...
+    }:
     let
       # Reference treefmt by absolute store path: the `nix flake check` hk-check
       # sandbox runs the pre-commit hook without the devshell PATH, so a bare
@@ -21,6 +26,23 @@
             fix = "${treefmt} {{files}}";
           };
         };
+
+        "pre-push".steps = {
+          deadnix = {
+            glob = "*.nix";
+            check = "${lib.getExe pkgs.deadnix} --fail {{files}}";
+          };
+          clippy = {
+            check = "cargo clippy --all-targets --all-features -- -D warnings";
+          };
+          lock-check = {
+            check = "cargo metadata --locked --format-version 1 > /dev/null";
+          };
+        };
+
+        # hk runs this one itself, so no tool needs pinning. Note it has no
+        # equivalent of --require-scope; --allowed-types is the only policy knob.
+        "commit-msg".steps.conventional.builtin = config.hk-nix.builtins.check_conventional_commit;
       };
     };
 }
