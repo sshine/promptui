@@ -2,6 +2,7 @@ pub mod agent_overview;
 pub mod agent_scope;
 pub mod border_box;
 pub mod breadcrumb;
+pub mod draw;
 pub mod message_list;
 pub mod notice;
 pub mod padding;

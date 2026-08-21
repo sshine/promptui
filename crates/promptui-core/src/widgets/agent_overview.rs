@@ -10,6 +10,7 @@ use crate::input::Input;
 use crate::theme::Theme;
 use crate::widgets::agent_scope::{AgentStatus, format_tokens};
 use crate::widgets::border_box::{BorderBox, BorderStyle};
+use crate::widgets::draw::draw_text;
 use crate::widgets::message_list::{Message, MessageList};
 use crate::widgets::padding::Padding;
 use crate::widgets::scroll_box::ScrollBox;
@@ -459,17 +460,7 @@ impl AgentOverview {
                 let stats_str = format!(" {} ", stats_parts.join(" \u{00B7} "));
                 let stats_start = x_max.saturating_sub(stats_str.len() as u16);
                 if stats_start > x {
-                    let mut sx = stats_start;
-                    for ch in stats_str.chars() {
-                        if sx >= x_max {
-                            break;
-                        }
-                        if let Some(cell) = buf.cell_mut((sx, row_y)) {
-                            cell.set_char(ch);
-                            cell.set_style(muted_style);
-                        }
-                        sx += 1;
-                    }
+                    draw_text(buf, stats_start, row_y, x_max, &stats_str, muted_style);
                 }
             }
         }
@@ -890,17 +881,7 @@ impl AgentOverview {
                 let stats_str = format!(" {} ", stats_parts.join(" \u{00B7} "));
                 let stats_start = x_max.saturating_sub(stats_str.len() as u16);
                 if stats_start > x {
-                    let mut sx = stats_start;
-                    for ch in stats_str.chars() {
-                        if sx >= x_max {
-                            break;
-                        }
-                        if let Some(cell) = buf.cell_mut((sx, row_y)) {
-                            cell.set_char(ch);
-                            cell.set_style(muted);
-                        }
-                        sx += 1;
-                    }
+                    draw_text(buf, stats_start, row_y, x_max, &stats_str, muted);
                 }
             }
         }
@@ -913,17 +894,14 @@ impl AgentOverview {
                 let hint_style = Style::default()
                     .fg(self.theme.text_muted)
                     .bg(self.theme.panel_bg);
-                let mut x = inner.x + 1;
-                for ch in hint.chars() {
-                    if x >= inner.x + inner.width {
-                        break;
-                    }
-                    if let Some(cell) = buf.cell_mut((x, hint_y)) {
-                        cell.set_char(ch);
-                        cell.set_style(hint_style);
-                    }
-                    x += 1;
-                }
+                draw_text(
+                    buf,
+                    inner.x + 1,
+                    hint_y,
+                    inner.x + inner.width,
+                    &hint,
+                    hint_style,
+                );
             }
         }
     }
