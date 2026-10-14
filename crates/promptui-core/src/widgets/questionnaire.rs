@@ -6,6 +6,7 @@ use ratatui::widgets::Widget;
 use crate::focus::{FocusAction, Focusable};
 use crate::input::Input;
 use crate::theme::Theme;
+use crate::widgets::draw::draw_text;
 use crate::widgets::padding::Padding;
 use crate::widgets::text_field::TextField;
 
@@ -117,10 +118,10 @@ impl Question {
                 .iter()
                 .find(|o| o.selected)
                 .map(|o| {
-                    if let Some(ref text) = o.inline_text {
-                        if !text.is_empty() {
-                            return format!("{}: {}", o.label, text);
-                        }
+                    if let Some(ref text) = o.inline_text
+                        && !text.is_empty()
+                    {
+                        return format!("{}: {}", o.label, text);
                     }
                     o.label.clone()
                 })
@@ -441,12 +442,11 @@ impl Questionnaire {
                 let content = self.inline_field.content();
                 let tab = self.current_tab;
                 let opt = self.focused_option;
-                if let Some(q) = self.questions.get_mut(tab) {
-                    if let Some(o) = q.options.get_mut(opt) {
-                        if o.inline_text.is_some() {
-                            o.inline_text = Some(content);
-                        }
-                    }
+                if let Some(q) = self.questions.get_mut(tab)
+                    && let Some(o) = q.options.get_mut(opt)
+                    && o.inline_text.is_some()
+                {
+                    o.inline_text = Some(content);
                 }
                 self.inline_field.set_focused(false);
             }
@@ -686,17 +686,7 @@ impl Questionnaire {
 
         // --- Question prompt ---
         if y < y_max {
-            let mut x = text_x;
-            for ch in q.prompt.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(prompt_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, text_x, y, text_x + text_width, &q.prompt, prompt_style);
             y += 1;
         }
 
@@ -817,11 +807,12 @@ impl Questionnaire {
                             x += 1;
                         }
 
-                        if is_editing && x < text_x + text_width {
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char('\u{2588}');
-                                cell.set_style(primary_style);
-                            }
+                        if is_editing
+                            && x < text_x + text_width
+                            && let Some(cell) = buf.cell_mut((x, y))
+                        {
+                            cell.set_char('\u{2588}');
+                            cell.set_style(primary_style);
                         }
                     }
 
@@ -839,23 +830,21 @@ impl Questionnaire {
                         q.text_content.clone()
                     };
 
-                    let mut x = text_x;
-                    for ch in display_text.chars() {
-                        if x >= text_x + text_width {
-                            break;
-                        }
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char(ch);
-                            cell.set_style(field_style);
-                        }
-                        x += 1;
-                    }
+                    let x = draw_text(
+                        buf,
+                        text_x,
+                        y,
+                        text_x + text_width,
+                        &display_text,
+                        field_style,
+                    );
 
-                    if is_editing && x < text_x + text_width {
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char('\u{2588}');
-                            cell.set_style(primary_style);
-                        }
+                    if is_editing
+                        && x < text_x + text_width
+                        && let Some(cell) = buf.cell_mut((x, y))
+                    {
+                        cell.set_char('\u{2588}');
+                        cell.set_style(primary_style);
                     }
 
                     y += 1;
@@ -871,17 +860,7 @@ impl Questionnaire {
         // --- Hint bar ---
         if y < y_max {
             let hint = self.hint_text();
-            let mut x = text_x;
-            for ch in hint.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(muted_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, text_x, y, text_x + text_width, hint, muted_style);
         }
     }
 
@@ -924,17 +903,7 @@ impl Questionnaire {
         // --- Header ---
         if y < y_max {
             let header = "Summary";
-            let mut x = text_x;
-            for ch in header.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(header_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, text_x, y, text_x + text_width, header, header_style);
             y += 1;
         }
 
@@ -1067,17 +1036,7 @@ impl Questionnaire {
         // --- Hint bar ---
         if y < y_max {
             let hint = self.hint_text();
-            let mut x = text_x;
-            for ch in hint.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(muted_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, text_x, y, text_x + text_width, hint, muted_style);
         }
     }
 
@@ -1109,17 +1068,14 @@ impl Questionnaire {
             .width
             .saturating_sub(BORDER_WIDTH + self.padding.horizontal());
         let summary = self.summary_text();
-        let mut x = text_x;
-        for ch in summary.chars() {
-            if x >= text_x + text_width {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((x, area.y)) {
-                cell.set_char(ch);
-                cell.set_style(text_style);
-            }
-            x += 1;
-        }
+        draw_text(
+            buf,
+            text_x,
+            area.y,
+            text_x + text_width,
+            &summary,
+            text_style,
+        );
     }
 }
 

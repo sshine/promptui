@@ -987,10 +987,10 @@ mod tests {
         let mut reversed_count = 0;
         for y in area.y..area.y + area.height {
             for x in area.x..area.x + area.width {
-                if let Some(cell) = buf.cell((x, y)) {
-                    if cell.style().add_modifier.contains(Modifier::REVERSED) {
-                        reversed_count += 1;
-                    }
+                if let Some(cell) = buf.cell((x, y))
+                    && cell.style().add_modifier.contains(Modifier::REVERSED)
+                {
+                    reversed_count += 1;
                 }
             }
         }

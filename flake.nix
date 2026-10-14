@@ -22,9 +22,12 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    lefthook-nix = {
-      url = "github:sudosubin/lefthook.nix";
+    hk-nix = {
+      url = "github:nix-tools/hk-nix";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.treefmt-nix.follows = "treefmt-nix";
+      inputs.import-tree.follows = "import-tree";
     };
     import-tree.url = "github:vic/import-tree";
   };

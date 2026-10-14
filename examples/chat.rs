@@ -128,10 +128,10 @@ impl App {
         text_field.set_border_color(status_bar.mode().color(&theme));
         if let Ok(cwd) = std::env::current_dir() {
             let mut display = cwd.display().to_string();
-            if let Ok(home) = std::env::var("HOME") {
-                if display.starts_with(&home) {
-                    display = format!("~{}", &display[home.len()..]);
-                }
+            if let Ok(home) = std::env::var("HOME")
+                && display.starts_with(&home)
+            {
+                display = format!("~{}", &display[home.len()..]);
             }
             status_bar.set_cwd(display);
         }
@@ -375,10 +375,9 @@ impl App {
                     // Mark the item done in the todo list block
                     if let Some(ContentBlock::TodoList { items, .. }) =
                         self.message_list.block_mut(block_index)
+                        && let Some(item) = items.get_mut(item_index)
                     {
-                        if let Some(item) = items.get_mut(item_index) {
-                            item.1 = true;
-                        }
+                        item.1 = true;
                     }
 
                     // Post a streamed assistant comment

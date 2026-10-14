@@ -127,10 +127,10 @@ impl TruncatedBlock {
     /// The number of visible content lines (respecting max_lines and expanded state).
     fn visible_content_lines(&self, text_width: u16) -> u16 {
         let full = self.full_content_height(text_width);
-        if self.expanded || self.max_lines.is_none() {
-            return full;
-        }
-        let max = self.max_lines.unwrap();
+        let max = match self.max_lines {
+            Some(max) if !self.expanded => max,
+            _ => return full,
+        };
         if full <= max {
             return full;
         }
@@ -144,12 +144,12 @@ impl TruncatedBlock {
 
     /// Whether content is currently truncated at the given width.
     pub fn is_truncated(&self, width: u16) -> bool {
-        if self.expanded || self.max_lines.is_none() {
-            return false;
-        }
+        let max = match self.max_lines {
+            Some(max) if !self.expanded => max,
+            _ => return false,
+        };
         let text_width = width.saturating_sub(self.h_overhead());
         let full = self.full_content_height(text_width);
-        let max = self.max_lines.unwrap();
         full > max
     }
 
@@ -169,18 +169,10 @@ impl TruncatedBlock {
         }
         let full = self.full_content_height(text_width);
 
-        let content_lines = if self.expanded || self.max_lines.is_none() {
-            full
-        } else {
-            let max = self.max_lines.unwrap();
-            if full <= max {
-                full
-            } else if self.show_overflow_hint {
-                // hint row is included in the max budget
-                max
-            } else {
-                max
-            }
+        // When truncated, the hint row (if any) is included in the max budget.
+        let content_lines = match self.max_lines {
+            Some(max) if !self.expanded => full.min(max),
+            _ => full,
         };
 
         content_lines + self.padding.vertical()
@@ -196,7 +188,7 @@ impl Scrollable for TruncatedBlock {
         // For now, ignore scroll_offset — TruncatedBlock handles its own truncation.
         // A future version could support scrolling within an expanded block.
         let _ = scroll_offset;
-        (&*self).render(area, buf);
+        self.render(area, buf);
     }
 }
 
@@ -238,8 +230,7 @@ impl Widget for &TruncatedBlock {
         }
 
         let full_height = self.full_content_height(text_width);
-        let truncated =
-            !self.expanded && self.max_lines.is_some() && full_height > self.max_lines.unwrap();
+        let truncated = !self.expanded && self.max_lines.is_some_and(|max| full_height > max);
 
         let visible_lines = self.visible_content_lines(text_width);
 
@@ -375,6 +366,6 @@ mod tests {
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
         (&block).render(area, &mut buf);
-        assert_eq!(buf.cell((0, 0)).unwrap().symbol(), LEFT_BORDER);
+        assert_eq!(buf[(0, 0)].symbol(), LEFT_BORDER);
     }
 }

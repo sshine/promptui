@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Widget;
 
 use crate::theme::Theme;
+use crate::widgets::draw::draw_text;
 use crate::widgets::padding::Padding;
 
 /// Agent operating mode, cycled by Tab.
@@ -266,17 +267,7 @@ impl Widget for &StatusBar {
         let right_start = x_max.saturating_sub(right_len);
 
         // Draw right side in muted style with separators
-        let mut rx = right_start;
-        for ch in right_text.chars() {
-            if rx >= x_max {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((rx, text_y)) {
-                cell.set_char(ch);
-                cell.set_style(muted_style);
-            }
-            rx += 1;
-        }
+        draw_text(buf, right_start, text_y, x_max, &right_text, muted_style);
     }
 }
 

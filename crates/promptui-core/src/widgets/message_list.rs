@@ -8,6 +8,7 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use crate::theme::Theme;
 use crate::widgets::agent_scope::DisplayMode;
+use crate::widgets::draw::draw_text;
 use crate::widgets::padding::Padding;
 use crate::widgets::scroll_box::Scrollable;
 use crate::widgets::truncated_block::TruncatedBlock;
@@ -570,29 +571,10 @@ impl MessageList {
             return;
         }
 
-        let mut x = text_x;
-        for ch in display.chars() {
-            if x >= area.x + area.width {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_char(ch);
-                cell.set_style(text_style);
-            }
-            x += 1;
-        }
+        let x = draw_text(buf, text_x, y, area.x + area.width, display, text_style);
 
         if needs_ellipsis {
-            for ch in "...".chars() {
-                if x >= area.x + area.width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(ellipsis_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, x, y, area.x + area.width, "...", ellipsis_style);
         }
     }
 
@@ -615,17 +597,7 @@ impl MessageList {
         let y = screen_top;
         if y < screen_bottom {
             let label = format!("Tool: {}", name);
-            let mut x = text_x;
-            for ch in label.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(label_style);
-                }
-                x += 1;
-            }
+            draw_text(buf, text_x, y, text_x + text_width, &label, label_style);
         }
 
         // TruncatedBlock content below the label
@@ -672,17 +644,7 @@ impl MessageList {
         }
 
         let label = format!("Tool: {}", name);
-        let mut x = text_x;
-        for ch in label.chars() {
-            if x >= text_x + text_width {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_char(ch);
-                cell.set_style(label_style);
-            }
-            x += 1;
-        }
+        draw_text(buf, text_x, y, text_x + text_width, &label, label_style);
     }
 
     /// Render a questionnaire summary (same in full and compact).
@@ -719,17 +681,7 @@ impl MessageList {
             "Survey: {} \u{00B7} {}/{}",
             summary_text, progress.0, progress.1
         );
-        let mut x = text_x;
-        for ch in label.chars() {
-            if x >= text_x + text_width {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_char(ch);
-                cell.set_style(text_style);
-            }
-            x += 1;
-        }
+        draw_text(buf, text_x, y, text_x + text_width, &label, text_style);
     }
 
     /// Render a todo list in full mode (title + items).
@@ -769,17 +721,14 @@ impl MessageList {
         if y < screen_bottom {
             let done_count = items.iter().filter(|(_, d)| *d).count();
             let title_text = format!("{} ({}/{})", title, done_count, items.len());
-            let mut x = text_x;
-            for ch in title_text.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(title_style);
-                }
-                x += 1;
-            }
+            draw_text(
+                buf,
+                text_x,
+                y,
+                text_x + text_width,
+                &title_text,
+                title_style,
+            );
             y += 1;
         }
 
@@ -794,28 +743,8 @@ impl MessageList {
                 ("[ ]", pending_check_style, pending_label_style)
             };
 
-            let mut x = text_x;
-            for ch in check.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(check_style);
-                }
-                x += 1;
-            }
-            x += 1; // space
-            for ch in label.chars() {
-                if x >= text_x + text_width {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_char(ch);
-                    cell.set_style(label_style);
-                }
-                x += 1;
-            }
+            let x = draw_text(buf, text_x, y, text_x + text_width, check, check_style);
+            draw_text(buf, x + 1, y, text_x + text_width, label, label_style);
             y += 1;
         }
     }
@@ -852,17 +781,7 @@ impl MessageList {
 
         let done_count = items.iter().filter(|(_, d)| *d).count();
         let label = format!("{} ({}/{})", title, done_count, items.len());
-        let mut x = text_x;
-        for ch in label.chars() {
-            if x >= text_x + text_width {
-                break;
-            }
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_char(ch);
-                cell.set_style(text_style);
-            }
-            x += 1;
-        }
+        draw_text(buf, text_x, y, text_x + text_width, &label, text_style);
     }
 }
 

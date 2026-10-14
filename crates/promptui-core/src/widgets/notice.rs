@@ -97,10 +97,10 @@ impl Notice {
 
     /// Dismiss the notice if its duration has elapsed. Call this every tick.
     pub fn tick(&mut self) {
-        if let Some(ref active) = self.active {
-            if active.shown_at.elapsed() >= self.duration {
-                self.active = None;
-            }
+        if let Some(ref active) = self.active
+            && active.shown_at.elapsed() >= self.duration
+        {
+            self.active = None;
         }
     }
 
@@ -290,7 +290,7 @@ mod tests {
         let mut notice = Notice::new(theme);
         notice.show(NoticeLevel::Warn, "test");
         let p = notice.progress();
-        assert!(p >= 0.0 && p <= 1.0);
+        assert!((0.0..=1.0).contains(&p));
     }
 
     #[test]

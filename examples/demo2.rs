@@ -136,10 +136,10 @@ impl App {
         text_field.set_border_color(status_bar.mode().color(&theme));
         if let Ok(cwd) = std::env::current_dir() {
             let mut display = cwd.display().to_string();
-            if let Ok(home) = std::env::var("HOME") {
-                if display.starts_with(&home) {
-                    display = format!("~{}", &display[home.len()..]);
-                }
+            if let Ok(home) = std::env::var("HOME")
+                && display.starts_with(&home)
+            {
+                display = format!("~{}", &display[home.len()..]);
             }
             status_bar.set_cwd(display);
         }
@@ -416,15 +416,15 @@ impl App {
                 // Cursor
                 let focused = self.focus_stack.top();
                 if is_questionnaire {
-                    if let Some(ref q) = self.questionnaire {
-                        if let Some(pos) = q.cursor_position(chunks[1]) {
-                            frame.set_cursor_position(pos);
-                        }
-                    }
-                } else if focused == FocusId::TextField {
-                    if let Some(pos) = self.text_field.cursor_position(chunks[3]) {
+                    if let Some(ref q) = self.questionnaire
+                        && let Some(pos) = q.cursor_position(chunks[1])
+                    {
                         frame.set_cursor_position(pos);
                     }
+                } else if focused == FocusId::TextField
+                    && let Some(pos) = self.text_field.cursor_position(chunks[3])
+                {
+                    frame.set_cursor_position(pos);
                 }
             })?;
 
@@ -531,7 +531,7 @@ impl App {
                                         self.spawn_mock_agents(&tx);
                                         self.notice.show(
                                             NoticeLevel::Info,
-                                            &format!(
+                                            format!(
                                                 "Plan accepted in {:?} mode — agents spawned",
                                                 target_mode
                                             ),
@@ -763,7 +763,7 @@ impl App {
                 self.scroll_box.scroll_to_bottom();
                 self.notice.show(
                     NoticeLevel::Warn,
-                    &format!("{:?} mode: tool UI not yet implemented", mode),
+                    format!("{:?} mode: tool UI not yet implemented", mode),
                 );
             }
         }
